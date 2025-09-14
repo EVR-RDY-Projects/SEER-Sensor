@@ -1,15 +1,16 @@
-# SEER Sensor – BOM (Mini-PC Build)
+# BOM – Mini-PC (POC)
 
 ## Goal
-Low-cost x86 mini-PC build for stable packet capture at 1 Gbps.
+Evaluate SEER performance on a low-cost x86 mini-PC.
 
-## Planned Parts
-- CPU: TBD (e.g., Intel J4125 or similar low-power quad-core)
-- RAM: TBD (8–16 GB recommended)
-- Storage: TBD (SSD for OS, hot-swappable bay for PCAPs)
-- NIC: TBD (dual-port or quad-port GbE card)
-- Case/PSU: TBD
-- Approximate Cost: TBD
+## Draft Parts
+| Component | Example Model | Qty | Cost | Notes |
+|-----------|---------------|-----|------|-------|
+| CPU       | Intel J4125   | 1   | TBD  | Low-power quad-core |
+| RAM       | 8–16 GB DDR4  | 1   | TBD  | Enough for Zeek + buffer |
+| Storage   | 256 GB SSD    | 1   | TBD  | OS + logs |
+| NIC       | Dual GbE card | 1   | TBD  | Dedicated capture port |
+| Case/PSU  | Small form    | 1   | TBD  | Fanless preferred |
 
-## Notes
-This file is a placeholder until specific hardware is validated.
+## Status
+Draft BOM — parts not finalized.
