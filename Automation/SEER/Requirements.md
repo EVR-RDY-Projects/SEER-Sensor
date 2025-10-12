@@ -1,3 +1,29 @@
+## SEER Sensor — Overview (Summary)
+
+SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs via tcpdump into a ring buffer, analyzes live traffic with Zeek over AF_PACKET, and safely evacuates PCAPs to an external drive (PCAP-only). A mover enforces a bounded ring by exporting the oldest safe files; integrity is enforced with streaming SHA-256, atomic manifests, and append-only transfer logs. A lightweight Agent Tracker maintains an on-box heartbeat inventory, while a Shipper (later) sends Zeek JSON and agent/service logs one-way over UDP through the GHOST diode to RAMPART. A TUI + local Status API surfaces health (capture/Zeek), storage pressure, current PCAP destination (which drive), integrity stats, and the number of agents reporting. An installer (last) provisions users/dirs, systemd units, and kernel tunings. Everything runs as `seer:seer`, writes state atomically, and degrades safely under disk or link pressure.
+
+---
+
+## Table of Contents
+
+- [Requirement 0 — Interactive Setup & Configuration Wizard](#requirement-0--interactive-setup--configuration-wizard)
+- [Requirement 1 — PCAP Capture & Ring Buffer (tcpdump)](#requirement-1--pcap-capture--ring-buffer-tcpdump)
+- [Requirement 1a — Service Definition for PCAP Capture (tcpdump)](#requirement-1a--service-definition-for-pcap-capture-tcpdump)
+- [Requirement 2 — Zeek Live Analysis via AF_PACKET](#requirement-2--zeek-live-analysis-via-af_packet)
+- [Requirement 2a — Service Definition for Zeek (AF_PACKET)](#requirement-2a--service-definition-for-zeek-af_packet)
+- [Requirement 3 — PCAP Mover (oldest-out with export-preferred path)](#requirement-3--pcap-mover-oldest-out-with-export-preferred-path)
+- [Requirement 3a — Timer & Service Definition for Mover](#requirement-3a--timer--service-definition-for-mover-unchanged--export-aware-notes)
+- [Requirement 4 — Hot-Swap / Export (External Drive Offload)](#requirement-4--hot-swap--export-external-drive-offload)
+- [Req 5 — Integrity: checksums/manifests & logging conventions](#req-5--integrity-checksumsmanifests--logging-conventions)
+- [Req 6 — Agent Tracker (environment heartbeat & inventory)](#req-6--agent-tracker-environment-heartbeat--inventory)
+- [Req 7 — JSON & Agent Logs Shipper (UDP over GHOST to RAMPART)](#req-7--json--agent-logs-shipper-udp-over-ghost-to-rampart)
+- [Req 8 — Monitoring: TUI Console & Status API](#req-8--monitoring-tui-console--status-api)
+- [Req 9 — Installer & sysctl / Kernel Tuning (deploy everything last)](#req-9--installer--sysctl--kernel-tuning-deploy-everything-last)
+
+> **Tip (GitHub anchors):** Links above use GitHub’s automatic heading anchors (lowercased text with spaces → hyphens, punctuation stripped). If any link doesn’t jump as expected, hover the 🔗 icon beside the target heading to copy its exact anchor and update the TOC.  
+> **Optional:** Add a small “Back to top” link at the end of each section: `[↑ Back to top](#seer-sensor--overview-summary)` (adjust the anchor if you rename the summary heading).
+
+
 # Requirement 0 — Interactive Setup & Configuration Wizard
 
 ## Purpose
