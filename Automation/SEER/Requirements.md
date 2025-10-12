@@ -1,4 +1,4 @@
-## SEER Sensor — Overview (Summary)
+# SEER Sensor — Overview (Summary)
 
 SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs via tcpdump into a ring buffer, analyzes live traffic with Zeek over AF_PACKET, and safely evacuates PCAPs to an external drive (PCAP-only). A mover enforces a bounded ring by exporting the oldest safe files; integrity is enforced with streaming SHA-256, atomic manifests, and append-only transfer logs. A lightweight Agent Tracker maintains an on-box heartbeat inventory, while a Shipper (later) sends Zeek JSON and agent/service logs one-way over UDP through the GHOST diode to RAMPART. A TUI + local Status API surfaces health (capture/Zeek), storage pressure, current PCAP destination (which drive), integrity stats, and the number of agents reporting. An installer (last) provisions users/dirs, systemd units, and kernel tunings. Everything runs as `seer:seer`, writes state atomically, and degrades safely under disk or link pressure.
 
@@ -18,6 +18,8 @@ SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs 
 - [Req 7 — JSON & Agent Logs Shipper (UDP over GHOST to RAMPART)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-7--json--agent-logs-shipper-udp-over-ghost-to-rampart)
 - [Req 8 — Monitoring: TUI Console & Status API](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-8--monitoring-tui-console--status-api)
 - [Req 9 — Installer & sysctl / Kernel Tuning (deploy everything last)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-9--installer--sysctl--kernel-tuning-deploy-everything-last)
+
+[↑ Back to top](#seer-sensor--overview-summary)
 
 
 > **Optional:** Add a small “Back to top” link at the end of each section: `[↑ Back to top](#seer-sensor--overview-summary)` (adjust the anchor if you rename the summary heading).
