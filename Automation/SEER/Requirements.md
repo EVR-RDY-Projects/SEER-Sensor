@@ -720,3 +720,307 @@ agent_tracker:
 - On receiving valid heartbeats, agents.state and agents.registry.json update atomically.
 - Malformed heartbeats log warnings without crashing or blocking the service
 
+# Req 7 — JSON & Agent Logs Shipper (UDP over GHOST to RAMPART)
+
+## Purpose
+Reliably transmit Zeek JSON and agent/service logs **one-way via UDP** across the GHOST diode to RAMPART, without acknowledgments, while preventing local buildup and avoiding interference with PCAP workflows.
+
+## Scope
+- **Inputs:** Zeek JSON (`json_spool`) and optional agent/service logs directory.
+- **Output:** UDP datagrams to RAMPART ingest on the IT/RX side.
+- **Excludes:** PCAP files (handled only by external-drive export).
+- Runs as user `seer`; no inbound connectivity required.
+
+## Behavior
+
+### 1) File eligibility
+- A JSON/log file is “stable/ready” when its size is unchanged across two polls (e.g., 2 seconds apart).
+- Never send files still being written.
+
+### 2) Framing & transmission
+- Default: line-delimited JSON; send **each line** as one UDP datagram.
+- Optional: **per-file gzip**, then ship framed chunks with a minimal header containing `sensor_id`, `file_id`, `seq`, and `total`.
+- Respect MTU; use a safe max UDP payload (e.g., 1200 bytes) when chunking.
+
+### 3) Ordering & metadata
+- Best-effort ordering only (UDP).
+- Include lightweight headers per datagram: `sensor_id`, `file_id`, `seq` (and `total` when compressed).
+
+### 4) Rate limiting & backoff
+- Enforce `max_bytes_per_sec` via a token-bucket.
+- On send errors (e.g., buffer full), apply exponential backoff and requeue unsent chunks.
+
+### 5) File lifecycle
+- After a successful **full** send of a file:
+  - **Default:** move file to `json_spool/sent/` and create a small sidecar marker recording last-send timestamp and byte count.
+  - **Option:** delete after send (`retention: delete_after_send`).
+- On failure/partial: keep file; retry next cycle.
+
+### 6) Resilience
+- Power-safe: derive state from filesystem (presence in `sent/` and `.sent` markers).
+- If RAMPART is unreachable, queue depth grows locally; shipper retries at a capped rate without blocking other components.
+
+## Configuration (seer.yml keys)
+- `shipper.enable`: true/false
+- `shipper.udp_target_host`: IP or hostname of RAMPART ingest
+- `shipper.udp_target_port`: integer
+- `shipper.poll_interval_sec`: float (default 1.0)
+- `shipper.max_bytes_per_sec`: integer (e.g., 250000 default)
+- `shipper.compress`: boolean (default false)
+- `shipper.json_spool`: path (default `/var/seer/json_spool`)
+- `shipper.extra_logs_dir`: optional path for agent/service logs
+- `shipper.retention`: `move_to_sent` (default) | `delete_after_send`
+- `sensor_id`: string identifier included in headers/markers
+
+## Outputs (for Monitor)
+- `/var/log/seer/shipper.state` (atomic JSON):
+  - `udp_target` (host:port), `queue_depth`, `bytes_sent_1m`, `send_errors_1m`, `backoff_level`, `last_sent_ts`
+- Optional per-file sidecar in `sent/`: `<filename>.sent` with `sent_ts`, `bytes`, `lines`, `compress=true|false`, optional `hash`.
+
+## Logging (journald identifier: `seer-shipper`)
+- INFO: `file_start path=… size=… mode=json|gzip`
+- INFO: `file_done path=… lines=… bytes=… duration_ms=…`
+- WARNING: `send_error errno=… backoff=…`
+- ERROR: `open_failed|read_failed|stats_failed path=… reason=…`
+
+## Security & hardening
+- Runs as `seer`; no elevated capabilities.
+- **Outbound UDP only**; no listener sockets.
+- Prefer static IP for `udp_target_host` to avoid DNS dependency; optional allowlist.
+
+## Interactions & contracts
+- **Monitoring (Req 8):** reads `shipper.state` to show `q=<depth>`, `rate=<bytes/min>`, `errors`, `backoff`, `last` sent age.
+- **Agent Tracker (Req 6):** independent; may also ship tracker logs if `extra_logs_dir` is configured.
+- **Integrity (Req 5):** may compute per-file sha256 and store in the `.sent` marker (optional).
+- **Installer (Req 9):** deploys unit and ensures `json_spool` and `sent/` exist.
+
+## Validation rules
+- Only **stable** files are transmitted.
+- `max_bytes_per_sec` enforced within ±10%.
+- Compressed-mode chunking respects max datagram size and includes sequence metadata.
+- When RAMPART is unreachable, the shipper does not crash; queue depth grows while rate is bounded by backoff.
+
+## Acceptance criteria
+- Under normal conditions, the shipper drains `json_spool` continuously; queue depth stays near zero.
+- During outages, files accumulate; upon recovery, backlog drains without exceeding rate limits.
+- Monitor shows target, queue depth, bytes/min, error count, and backoff level.
+- **PCAP files are never touched** by the shipper.
+
+## Non-functional
+- Low CPU/memory footprint; I/O-bound on file reads.
+- No external libraries beyond stdlib (if feasible).
+- Deterministic across restarts using filesystem state only.
+
+# Req 8 — Monitoring: TUI Console & Status API
+
+## Purpose
+Provide a live terminal dashboard (TUI) and a local JSON Status API summarizing SEER state:
+- Capture & Zeek health
+- Ring/Queue/Backlog counts and disk usage
+- **Current PCAP destination (which drive/mount)**
+- **Number of agents reporting**
+- Export activity and integrity counters
+- Shipper queue/throughput (when enabled)
+
+## Scope
+- Read-only aggregation; no control-plane actions.
+- Works offline; minimal dependencies.
+- Two consumers:
+  - TUI: full-screen, flicker-free, refresh every `refresh_interval` (default 0.5s).
+  - Status API: HTTP `GET 127.0.0.1:8088/status` returns unified JSON.
+
+## Inputs (seer.yml)
+- `refresh_interval` (float, default 0.5)
+- Paths: `ring_dir`, `dest_dir`, `backlog_dir`
+- Optional UI: `ui.colors` (bool), `ui.show_site_breakdown` (bool)
+
+## Data Contracts (producers → monitor; all files written atomically)
+- `/var/log/seer/capture.state`
+  - service, status, iface, snaplen, rotate_seconds, last_file, last_roll_ts
+- `/var/log/seer/zeek.state`
+  - service, status, workers, fanout_id, last_log_ts, drops_pct
+- `/var/log/seer/mover.state`
+  - buffer_threshold, ring_count, moved_export, moved_queue, moved_backlog, skipped_active, errors, last_action_ts
+- `/var/log/seer/export.state`
+  - active_target { mount, label, fs, free_pct }, bytes_exported_1h, files_exported_1h, last_export_ts, status
+- `/var/log/seer/agents.state`
+  - agent_count, last_heartbeat_ts, by_site { ... }, counters { total_heartbeats, invalid_messages, expired }
+- `/var/log/seer/integrity.state` (optional)
+  - manifests_written, verify_ok, verify_fail, last_verify_ts
+- `/var/log/seer/shipper.state` (when enabled)
+  - udp_target, queue_depth, bytes_sent_1m, send_errors_1m, backoff_level, last_sent_ts
+
+## TUI Layout
+Top bar (health):
+- `CAPTURE: <status> iface=<iface> roll=<sec> last_roll=<ago>   ZEEK: <status> workers=<n> drops=<pct>%`
+
+Middle left (storage):
+- `RING: <count> files  FS Used: <used%>`
+- `QUEUE: <count>   BACKLOG: <count>`
+
+Middle right (export & agents):
+- `PCAP DEST: <mode>` where:
+  - `export:<label>@<mount>` if an active export target exists
+  - else `queue` if queue has items
+  - else `backlog` if backlog has items
+  - else `ring`
+- `EXPORT: <status> target=<label>@<mount> free=<free_pct>% bytes_1h=<num> files_1h=<num> last=<ago>`
+- `AGENTS: <agent_count> reporting  last_heartbeat=<ago>` (+ by-site lines if enabled)
+
+Bottom bar (shipper, when enabled):
+- `SHIPPER: udp=<host:port> q=<depth> rate=<bytes/min> errors=<n> backoff=<lvl> last=<ago>`
+
+Footer:
+- `Input: (q=quit, r=refresh, ?=help)`
+
+## Status API (GET /status)
+Response body (omit sections that are missing/unknown):
+- `sensor` { hostname, version, ts }
+- `capture` { ... }
+- `zeek` { ... }
+- `ring` { dir, count, bytes, fs_used_pct }
+- `queues` { dest_dir { path, count, bytes }, backlog_dir { path, count, bytes } }
+- `export` { ... }
+- `agents` { agent_count, last_heartbeat_ts, by_site { ... } }
+- `integrity` { ... }
+- `shipper` { ... }
+
+## Drive/Mount Detection Logic (for “PCAP DEST”)
+- If `export.state.active_target` present → show `export:<label>@<mount>`.
+- Else if `queues.dest_dir.count > 0` → `queue`.
+- Else if `queues.backlog_dir.count > 0` → `backlog`.
+- Else → `ring`.
+
+## Reliability & Performance
+- Atomic reads of state files; tolerate missing files (display `unknown`).
+- No blocking on producers; use non-blocking file IO and short timeouts.
+- CPU target < 3% on small-form hardware.
+
+## Security
+- Runs as `seer:seer`; no elevated privileges.
+- API binds only to `127.0.0.1:8088`.
+
+## Validation Rules
+- Missing or malformed state files must not crash the TUI/API.
+- All timestamps rendered as humanized “ago” and raw epoch available in API.
+- Filesystem usage for `ring_dir` sampled each refresh; must not block UI.
+
+## Acceptance Criteria
+- TUI refreshes smoothly at configured interval with no flicker.
+- When an external drive is active, `PCAP DEST` shows `export:<label>@<mount>` within one refresh cycle.
+- Agent count and last heartbeat reflect `agents.state` accurately.
+- Status API returns 200 with well-formed JSON and includes available sections.
+
+# Req 9 — Installer & sysctl / Kernel Tuning (deploy everything last)
+
+## Purpose
+Provide a reliable, idempotent installer that provisions the SEER runtime, deploys all systemd units, applies kernel tuning, sets ownership/permissions, and (optionally) enables services — using values from `/opt/seer/etc/seer.yml`.
+
+## Scope
+- User/group creation
+- Directory creation and permissions
+- File deployment (bins/configs/units)
+- `systemd` daemon-reload, enable/start (optional)
+- Kernel `sysctl` tuning
+- Environment validation
+- Dry-run mode and backups
+
+## Inputs
+- Config: `/opt/seer/etc/seer.yml` (from Req 0)
+- Flags: `--dry-run`, `--no-enable`, `--yes` (non-interactive), `--interface <dev>` (override)
+- Required tools: `systemctl`, `sysctl`, `tcpdump`, `sha256sum`, `zeek` (optional to enable)
+- Paths (from YAML): `ring_dir`, `dest_dir`, `backlog_dir`, `json_spool`, logs, etc.
+
+## Operations
+1) **User/Group**
+   - Ensure `seer:seer` exists (locked shell, minimal home `/var/lib/seer` or none).
+
+2) **Directories (create if missing)**
+   - `/opt/seer/bin` (0755), `/opt/seer/etc` (0755)
+   - `/opt/seer/var/queue` (0750), `/opt/seer/var/backlog` (0750)
+   - `/var/seer/pcap_ring` (0750), `/var/seer/json_spool` (0750)
+   - `/var/log/seer` (0755)
+   - Ownership for all above: `seer:seer`
+
+3) **Deploy artifacts**
+   - Copy Python tools → `/opt/seer/bin` (`seer:seer`, 0755)
+   - Copy `seer.yml` → `/opt/seer/etc` (0644, `seer:seer`); back up existing as `seer.yml.bak-YYYYmmdd-HHMMSS`
+   - Install systemd units → `/etc/systemd/system/`:
+     - `seer-capture@.service` (Req 1a)
+     - `seer-zeek@.service` (Req 2a)
+     - `seer-move-oldest.service` & `seer-move-oldest.timer` (Req 3a)
+     - `seer-hotswap.service` (Req 4a)
+     - `seer-agents.service` (Req 6a)
+     - (Optional) `seer-console.service`, `seer-status.service` (Req 8)
+     - (Optional) `seer-shipper.service` (Req 7)
+   - Never overwrite a locally modified unit without making a `.bak-YYYYmmdd-HHMMSS`
+
+4) **Kernel tuning (`/etc/sysctl.d/99-seer.conf`)**
+   - Set:
+     - `net.core.rmem_max = 33554432`
+     - `net.core.wmem_max = 33554432`
+     - `net.core.netdev_max_backlog = 10000`
+   - Apply with `sysctl --system` and record effective values.
+
+5) **Validation**
+   - Interface (from YAML or `--interface`) exists & non-loopback.
+   - Binaries present: `tcpdump` (required), `zeek` (warn/skip enable if missing).
+   - All runtime dirs writable by `seer:seer` and on local FS.
+   - Free space on `ring_dir` FS ≥ 10% (warn if less).
+   - Read/parse YAML successfully.
+
+6) **Systemd integration**
+   - `systemctl daemon-reload`
+   - Unless `--no-enable`:
+     - Enable: `seer-capture@<iface>`, `seer-zeek@<iface>` (if Zeek present), `seer-move-oldest.timer`, `seer-hotswap.service`, `seer-agents.service`
+     - (Optional) Enable: `seer-status.service`, `seer-console.service`, `seer-shipper.service` (if configured)
+   - Start now unless `--no-enable` set; print exact start commands otherwise.
+
+7) **Post-install report**
+   - Summarize created/updated paths, owners, modes.
+   - List enabled/disabled units and their current status.
+   - Show quick commands:
+     - `systemctl status 'seer-*'`
+     - `journalctl -u seer-mover -u seer-hotswap -u seer-agents --since -1h`
+     - `ls -lh /var/seer/pcap_ring /opt/seer/var/queue /opt/seer/var/backlog`
+
+## Security & Hardening
+- All services run as `seer:seer`.
+- Units include `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome=yes`, `PrivateTmp=yes`, and minimal `ReadWritePaths`.
+- No persistent root-owned files in runtime paths.
+
+## Idempotency & Safety
+- Re-running yields the same end state; no duplicates.
+- Back up modified files before overwrite.
+- `--dry-run` prints actions and diffs without writing.
+- Never delete data in `ring_dir`, `dest_dir`, `backlog_dir`, or `json_spool`.
+
+## Observability
+- Append a line to `/var/log/seer/setup.log` with timestamp, user, version/revision, and actions taken.
+- Echo concise remediation hints for each failed check.
+
+## Validation Rules
+- YAML must parse; missing critical keys abort with a clear message.
+- `systemctl daemon-reload` must succeed.
+- If enabling units, each `systemctl enable` returns success (or is skipped with rationale).
+- `sysctl` values are active after install.
+
+## Acceptance Criteria
+- `seer` user exists; all runtime dirs present with correct perms/owners.
+- `/etc/sysctl.d/99-seer.conf` exists and is applied.
+- Units installed; enabled/started per flags.
+- `systemctl status` shows active or a clear, actionable error for each enabled unit.
+- No permission errors in first-run logs.
+
+## Edge Cases
+- Zeek missing: skip enabling `seer-zeek@.service`, warn, continue.
+- Read-only `/etc` or `/usr`: abort with remediation instructions.
+- Conflicting unit names pre-exist: back up and replace, report change.
+- Multi-NIC hosts: `--interface` overrides YAML for enable/start only; YAML remains the source of truth.
+
+## Non-Functional
+- Offline-capable; no network required.
+- Minimal dependencies (coreutils, systemd, sysctl).
+- Clear, copy-pasteable remediation guidance for common failures.
+
+
