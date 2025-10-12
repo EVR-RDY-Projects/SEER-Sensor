@@ -371,3 +371,110 @@ Provide a systemd **oneshot** service and **recurring timer** to trigger the mov
 - Periodic runs visible via `systemctl list-timers`.
 - With an external drive mounted, ticks route files to export; without it, ticks route to queue/backlog.
 - After reboot, first tick processes accumulated ring files due to `Persistent=true`.
+# Requirement 4 — Hot-Swap / Export (External Drive Offload)
+
+## Purpose
+Automatically detect an approved external drive and **export** staged artifacts (PCAPs and Zeek JSON) to it without dropping capture, then mark the export and signal it’s safe to remove.
+
+## Scope
+- Polls for presence of an approved mount (local block device; no network share required).
+- Transfers files from local staging to the external drive with integrity checks.
+- Writes clear logs and a human-readable receipt on the drive.
+- Runs continuously as a background service under `seer:seer`.
+
+## Sources (local staging)
+- `dest_dir` (primary queue for ready-to-export PCAPs)
+- `backlog_dir` (fallback queue when primary unavailable)
+- `json_spool` (Zeek JSON logs; include everything except files still open by Zeek)
+
+## Targets (external)
+- Prioritized mount candidates (default list; overridable in config):
+  - `/mnt/SEER_EXT`
+  - `/mnt/seer_ext`
+  - Any mount under `/mnt/` or `/media/` whose volume label contains `SEER` or `EXT`
+- The chosen target root will contain:
+  - `pcap/YYYYmmdd/` for PCAP files
+  - `zeek/YYYYmmdd/` for JSON logs
+  - `MANIFEST.txt` files (per batch directory)
+  - `TRANSFER.LOG` (append-only, root of the volume)
+  - Optional `.origin` markers (e.g., `.origin=mover`)
+
+## Behavior
+1. **Detection loop**: every `2s` (tunable), scan candidates for a writable mount with free space ≥ `min_free_pct` (default `2%` headroom above required bytes).
+2. **Locking**: ensure a single exporter instance via a lightweight PID/lock file under `/var/log/seer/export.lock`. If locked, sleep until available.
+3. **Selection**:
+   - Prefer files in `dest_dir`, then `backlog_dir`, then `json_spool`.
+   - Skip “active” files (modified within the last `rotate_seconds × 1.5` for PCAPs; for JSON, skip files still growing in size over two consecutive polls).
+4. **Transfer**:
+   - Same-filesystem: `rename` is atomic.
+   - Cross-filesystem: `copy → fsync → sha256 verify → remove source`. Never delete on verify failure; log and retry later.
+   - Place PCAPs under `pcap/YYYYmmdd/`; JSON under `zeek/YYYYmmdd/`.
+5. **Integrity**:
+   - For each destination subfolder created during a run, write a `MANIFEST.txt` containing lines of `sha256  relative/path`.
+   - Append one line per file to `TRANSFER.LOG` with timestamp, hostname, src, dst, size bytes, sha256 (short), and `result=OK|VERIFY_FAIL|IO_ERROR|SKIP_ACTIVE`.
+6. **Completion & Safe-remove hint**:
+   - When queues are empty (no eligible files), write/update a small `EXPORT_STATUS.json` at the volume root summarizing counts and last transfer time.
+   - If supported later, optionally touch a `SAFE_TO_REMOVE` marker when idle for >10s (purely informational; no hardware eject).
+
+## Inputs (from `/opt/seer/etc/seer.yml`)
+- `dest_dir`, `backlog_dir`, `json_spool`
+- `capture.rotate_seconds` (used for “active file” guard)
+- `export.mount_candidates` (list of mount paths/labels)
+- `export.min_free_pct` (default `2`)
+- `mover_log` or a dedicated `export_log` (implementation can reuse a shared log)
+
+## Interactions & Contracts
+- **With Requirement 3 (Mover)**:
+  - If mover directly wrote to the external drive (when present), exporter must **skip** those paths (no duplication).
+  - Otherwise, exporter drains `dest_dir` first, then `backlog_dir`.
+- **With Requirement 5 (Monitoring/TUI)**: expose counters: `export_ok`, `verify_fail`, `io_error`, `skipped_active`, `bytes_exported`, `last_export_ts`.
+- **With Requirement 7 (Integrity)**: use shared checksum/manifest helpers so hashing is consistent across mover/exporter.
+
+## Validation Rules
+- External target must be a local, writable mount and owned/accessible by `seer:seer`.
+- Free space check must include a small safety margin (`min_free_pct`).
+- Only closed files are exported (no growing files).
+- JSON file detection must avoid partial files (double-poll size check).
+
+## Acceptance Criteria
+- When an approved external drive is mounted, queued PCAPs and stable Zeek JSON are exported to the correct dated folders, with manifests and a running `TRANSFER.LOG`.
+- If no external is present, no files are lost; they remain in `dest_dir`/`backlog_dir` until a drive arrives.
+- On cross-device moves, a failed checksum prevents source deletion and is logged as `VERIFY_FAIL`.
+- Export resumes automatically after transient IO errors or after drive replacement.
+- Only one exporter runs at a time (lock respected).
+
+## Non-Functional
+- Low CPU overhead; incremental hashing (streaming) preferred for large files.
+- Resilient to power loss (never delete before successful verify on cross-FS).
+- Offline operation; no network dependency.
+
+---
+
+# Requirement 4a — Service Definition for Hot-Swap / Export
+
+## Purpose
+Provide a long-running systemd unit that continuously watches for external mounts and performs exports per Requirement 4.
+
+## Unit Model
+- Service name: `seer-hotswap.service`
+- Type: `simple` (long-running loop)
+- Ordering: `After=local-fs.target`; no network dependency
+- User/Group: `seer:seer`
+- Logging: journald identifier `seer-hotswap`
+- Restart policy: `Restart=always`, with backoff (e.g., 2s, 5s, 10s)
+- Security hardening:
+  - `NoNewPrivileges=yes`
+  - `ProtectSystem=full`
+  - `ProtectHome=yes`
+  - `PrivateTmp=yes`
+  - `ReadWritePaths=/opt/seer/var /var/seer /var/log/seer /mnt /media`
+  - Limit privileges to what’s required for file IO (no network caps)
+
+## Configuration Contract
+- Reads all paths and export settings from the YAML (Requirement 0).
+- Fails fast (and logs a clear error) if required staging directories are missing or unwritable, but keeps retrying on a healthy cadence after operator remediation.
+
+## Observability
+- Journald lines include: `action=export src=… dst=… bytes=… sha256=<short> result=…`
+- Optionally maintain a small state file at `/var/log/seer/export.state` for the TUI/API to read.
+
