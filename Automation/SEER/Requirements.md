@@ -6,7 +6,8 @@ SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs 
 
 ## Table of Contents
 
-- [Requirement 0 — Interactive Setup & Configuration Wizard](#requirement-0--interactive-setup--configuration-wizard)
+- [#requirement-0--interactive-setup--configuration-wizard](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-0--interactive-setup--configuration-wizard)
+- 
 - [Requirement 1 — PCAP Capture & Ring Buffer (tcpdump)](#requirement-1--pcap-capture--ring-buffer-tcpdump)
 - [Requirement 1a — Service Definition for PCAP Capture (tcpdump)](#requirement-1a--service-definition-for-pcap-capture-tcpdump)
 - [Requirement 2 — Zeek Live Analysis via AF_PACKET](#requirement-2--zeek-live-analysis-via-af_packet)
