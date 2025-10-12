@@ -5,14 +5,14 @@ SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs 
 ---
 
 ## Table of Contents
-- [Requirement 0 — Interactive Setup & Configuration Wizard](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-0--interactive-setup--configuration-wizard)
-- [Requirement 1 — PCAP Capture & Ring Buffer (tcpdump)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-1--pcap-capture--ring-buffer-tcpdump)
-- [Requirement 1a — Service Definition for PCAP Capture (tcpdump)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-1a--service-definition-for-pcap-capture-tcpdump)
-- [Requirement 2 — Zeek Live Analysis via AF_PACKET](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-2--zeek-live-analysis-via-af_packet)
-- [Requirement 2a — Service Definition for Zeek (AF_PACKET)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-2a--service-definition-for-zeek-af_packet)
-- [Requirement 3 — PCAP Mover (oldest-out with export-preferred path)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-3--pcap-mover-oldest-out-with-export-preferred-path)
+- [Req 0 — Interactive Setup & Configuration Wizard](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-0--interactive-setup--configuration-wizard)
+- [Req 1 — PCAP Capture & Ring Buffer (tcpdump)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-1--pcap-capture--ring-buffer-tcpdump)
+- [Req 1a — Service Definition for PCAP Capture (tcpdump)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-1a--service-definition-for-pcap-capture-tcpdump)
+- [Req  2 — Zeek Live Analysis via AF_PACKET](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-2--zeek-live-analysis-via-af_packet)
+- [Req 2a — Service Definition for Zeek (AF_PACKET)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-2a--service-definition-for-zeek-af_packet)
+- [Req 3 — PCAP Mover (oldest-out with export-preferred path)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-3--pcap-mover-oldest-out-with-export-preferred-path)
 - [Requirement 3a — Timer & Service Definition for Mover (unchanged + export-aware notes)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-3a--timer--service-definition-for-mover-unchanged--export-aware-notes)
-- [Requirement 4 — Hot-Swap / Export (External Drive Offload)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-4--hot-swap--export-external-drive-offload)
+- [Req 4 — Hot-Swap / Export (External Drive Offload)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-4--hot-swap--export-external-drive-offload)
 - [Req 5 — Integrity: checksums/manifests & logging conventions](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-5--integrity-checksumsmanifests--logging-conventions)
 - [Req 6 — Agent Tracker (environment heartbeat & inventory)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-6--agent-tracker-environment-heartbeat--inventory)
 - [Req 7 — JSON & Agent Logs Shipper (UDP over GHOST to RAMPART)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-7--json--agent-logs-shipper-udp-over-ghost-to-rampart)
