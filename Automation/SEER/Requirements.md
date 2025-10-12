@@ -470,6 +470,124 @@ Provide a long-running systemd unit that continuously watches for external mount
   - `ReadWritePaths=/opt/seer/var /var/seer /var/log/seer /mnt /media`
   - Limit privileges to what’s required for file IO (no network caps)
 
+# Req 5 — Integrity: checksums/manifests & logging conventions
+
+## Purpose
+Guarantee file-level integrity for PCAP exports and standardize logs so operators and parsers can trust provenance, detect corruption, and audit actions.
+
+## Scope
+- Applies to **PCAPs** handled by the Mover (Req 3) and Hot-swap Export (Req 4).
+- Provides shared helpers for future use by the Shipper (Req 7).
+- Defines **manifest** format, **verification** workflow, and **logging** conventions.
+- All operations run as `seer:seer` and use atomic file semantics.
+
+## Artifacts & Formats
+
+### 1) MANIFEST.txt (per destination subfolder)
+**Location**
+- On external drive, alongside exported files: `pcap/YYYYmmdd/MANIFEST.txt`.
+- (Optional) Local staging manifest under `dest_dir/YYYYmmdd/`.
+
+**Format** — one line per file:  
+`sha256  size_bytes  relative/path`
+
+**Example**
+    9c1f…a7  10485760  SEER-20251012-143000.pcap
+    1b54…2e   5242880  SEER-20251012-143020.pcap
+
+**Write semantics**
+- Build `MANIFEST.txt.tmp`, `fsync`, then `rename()` to `MANIFEST.txt`.
+
+### 2) TRANSFER.LOG (append-only, external drive root)
+**Purpose**
+- Human-readable receipt of every export attempt.
+
+**Line format** (space-delimited key=value)
+- `ts=2025-10-12T14:30:25Z host=seer-sensor-01 action=export src=/opt/seer/var/queue/SEER-20251012-143000.pcap dst=/mnt/SEER_EXT/pcap/20251012/SEER-20251012-143000.pcap bytes=10485760 sha256=9c1f…a7 result=OK batch=pcap-20251012 sensor_id=SEER01`
+
+**Result codes**
+- `OK | VERIFY_FAIL | IO_ERROR | SKIP_ACTIVE | SKIP_EXISTS`
+
+**Rotation**
+- Start a new file per day or when >50 MB.
+
+### 3) Local integrity state (for monitor)
+**File**
+- `/var/log/seer/integrity.state` (atomic JSON)
+
+**Shape**
+- `{"manifests_written":<int>,"verify_ok":<int>,"verify_fail":<int>,"last_verify_ts":<epoch>,"last_manifest_ts":<epoch>}`
+
+## Integrity Workflow
+
+### A) Mover (Req 3)
+1. Select oldest safe PCAP.
+2. **Cross-filesystem transfer**:
+   - Copy to `filename.part` while streaming `sha256`; `fsync`.
+   - Independently compute source `sha256`; compare.
+   - On match: `rename(filename.part → filename)`; delete source.
+   - On mismatch: delete `.part`, keep source; log `result=VERIFY_FAIL`.
+3. **Same filesystem**: use atomic `rename()`; optional deferred hash at export stage.
+4. Update `mover_log` and, if used, local `MANIFEST.txt`.
+
+### B) Hot-swap Export (Req 4)
+1. For each eligible PCAP, perform verify-on-copy if cross-FS.
+2. Append/merge entry in `pcap/YYYYmmdd/MANIFEST.txt`.
+3. Append one line to `TRANSFER.LOG`.
+4. Update `integrity.state` counters.
+
+**Never delete a source on cross-FS transfer until checksum verify passes.**
+
+## Logging Conventions
+
+**Journald identifiers**
+- `seer-capture`, `seer-zeek`, `seer-mover`, `seer-hotswap`, `seer-integrity`, `seer-monitor`, `seer-status`, `seer-shipper` (later).
+
+**Style**
+- Structured single-line `key=value` pairs.
+- Required keys (when applicable): `ts`, `host`, `action`, `src`, `dst`, `bytes`, `sha256` (short allowed in logs), `result`, `sensor_id`, `batch`.
+
+**Levels**
+- INFO: routine moves/exports, manifest writes.
+- WARNING: soft disk threshold, skipped active file.
+- ERROR: verify failed, I/O error, unwritable path.
+- CRITICAL: invalid configuration, cannot proceed.
+
+**Time**
+- All integrity/export timestamps are **UTC** ISO-8601 with `Z`.
+
+## Configuration (seer.yml)
+- `integrity.enable: true`
+- `integrity.hash_algo: sha256`
+- `integrity.manifest_max_size_mb: 50`
+- `integrity.sensor_id: SEER01`  (operator-set; included in logs)
+- `integrity.batch_prefix: pcap`  (e.g., `pcap-YYYYmmdd`)
+
+## Interactions & Contracts
+- Req 3/4 must call integrity helpers for hashing and manifest writes.
+- Req 8 (Monitoring) reads `integrity.state` and displays counters.
+- Req 7 (Shipper, later) reuses the hash helper for optional JSON checksums.
+- Req 9 (Installer) deploys helper libs and validates journald identifiers.
+
+## Validation Rules
+- `MANIFEST.txt` is written atomically (tmp → fsync → rename).
+- `TRANSFER.LOG` appends are atomic per line.
+- On verify failure: destination temp removed, source retained, ERROR logged with `result=VERIFY_FAIL`.
+- Hash algorithm is **sha256** only.
+- Timestamps are UTC.
+
+## Acceptance Criteria
+- Every exported file has a correct `MANIFEST.txt` entry (sha256 + size).
+- Cross-device copies never delete the source on checksum mismatch.
+- `TRANSFER.LOG` contains one line per attempted export with accurate result.
+- `integrity.state` counters reflect activity and are consumable by the monitor.
+- Monitoring surfaces `verify_ok` and `verify_fail` without blocking other components.
+
+## Non-Functional
+- Streamed hashing (low memory footprint).
+- CPU overhead bounded by disk throughput.
+- Power-safe due to atomic rename pattern and verify-before-delete.
+
 ## Configuration Contract
 - Reads all paths and export settings from the YAML (Requirement 0).
 - Fails fast (and logs a clear error) if required staging directories are missing or unwritable, but keeps retrying on a healthy cadence after operator remediation.
@@ -477,4 +595,128 @@ Provide a long-running systemd unit that continuously watches for external mount
 ## Observability
 - Journald lines include: `action=export src=… dst=… bytes=… sha256=<short> result=…`
 - Optionally maintain a small state file at `/var/log/seer/export.state` for the TUI/API to read.
+
+# Req 6 — Agent Tracker (environment heartbeat & inventory)
+
+## Purpose
+Maintain a lightweight, local inventory of deployed agents and a live **count of agents reporting**, so the monitor can display fleet health even in air-gapped deployments.
+
+## Scope
+- Receive agent heartbeats over **UDP** on the OT side (no inbound TCP).
+- Track last-seen timestamps and minimal metadata per agent.
+- Expire agents that stop reporting (configurable timeout).
+- Publish an atomic state file for the Monitor (Req 8).
+- Runs as `seer:seer`, offline, no external dependencies.
+
+## Heartbeat Protocol (wire format)
+- Transport: UDP (default port `5515`, configurable).
+- Payload: newline-delimited JSON (one heartbeat per datagram).
+- Required fields:
+  - `agent_id` (string; stable ID/UUID/hostname)
+  - `site` (string; e.g., OT-1) — optional
+  - `version` (string)
+  - `ip` (string; agent’s self-reported IP; receiver also records source IP)
+  - `ts` (sender’s epoch seconds)
+
+**Example heartbeat**
+```
+{"agent_id":"OT-PLC-01","site":"OT-1","version":"1.4.2","ip":"192.168.10.55","ts":1734036122}
+```
+
+## Behavior
+1) Listen on `<bind_addr>:<port>` (default `0.0.0.0:5515`).  
+2) Validate & normalize JSON; discard malformed entries (rate-limited warnings).  
+3) Record/update in an in-memory index and an on-disk registry:
+   - Keep: `first_seen`, `last_seen`, `agent_id`, `site`, `version`, `ip_src`, `ip_claimed`, `hb_count`.
+4) Expire agents whose `last_seen` is older than `agent_timeout_sec` (default **300s**).
+5) Persist registry periodically (e.g., every 5s or N updates) using temp + fsync + atomic rename.
+6) Publish monitor state after each write.
+7) Maintain rolling counters: total heartbeats, invalid/dropped, active agents.
+
+## Configuration (seer.yml)
+```
+agent_tracker:
+  enable: true
+  udp_bind_addr: "0.0.0.0"
+  udp_port: 5515
+  agent_timeout_sec: 300      # consider "offline" if no heartbeat within 5 min
+  persist_interval_sec: 5
+  max_registry_size: 10000    # safety cap on unique agents
+```
+
+## Outputs (atomic files for Monitor)
+- **/var/log/seer/agents.state**
+  - Shape:
+    ```
+    {
+      "agent_count": <int>,                  // active (not expired)
+      "last_heartbeat_ts": <epoch>,          // most recent receive time
+      "by_site": {"OT-1": N1, "OT-2": N2},   // optional site breakdown
+      "counters": {
+        "total_heartbeats": <int>,
+        "invalid_messages": <int>,
+        "expired": <int>
+      }
+    }
+    ```
+
+- **/var/log/seer/agents.registry.json**
+  - Per-agent entries:
+    ```
+    {
+      "agent_id": "OT-PLC-01",
+      "site": "OT-1",
+      "version": "1.4.2",
+      "ip_src": "192.168.10.55",
+      "ip_claimed": "192.168.10.55",
+      "first_seen": <epoch>,
+      "last_seen": <epoch>,
+      "hb_count": <int>,
+      "status": "active|expired"
+    }
+    ```
+
+> All writes use temp file → fsync → atomic rename to avoid partial reads.
+
+## Logging (journald identifier: seer-agents)
+- INFO: `hb_received agent_id=… site=… ip_src=…`
+- WARNING: `hb_invalid reason=…`
+- INFO: `agent_expired agent_id=… last_seen=…`
+- ERROR: I/O or JSON parsing errors (rate-limited)
+
+## Security & Hardening
+- Runs as `seer:seer`; no elevated caps.
+- UDP listener is local network only; no internet connectivity.
+- Optional allowlist (future): restrict by source subnet(s).
+
+## Interactions & Contracts
+- **Monitor (Req 8)** reads `agents.state` to show:
+  - `AGENTS: <agent_count> reporting, last_heartbeat=<ago>` (+ optional by-site lines).
+- **Shipper (Req 7, later)**: independent; no coupling.
+- **Installer (Req 9)**: deploys unit and ensures `/var/log/seer` exists.
+
+## Validation Rules
+- `agent_id` non-empty string ≤ 128 chars.
+- Reject payloads > 4 KB.
+- `agent_timeout_sec` in [60, 86400]; default 300.
+- Registry never exceeds `max_registry_size` (drop oldest expired first).
+
+## Acceptance Criteria
+- With two agents sending 30-second heartbeats, `agents.state.agent_count == 2` and updates within one refresh cycle.
+- After `agent_timeout_sec` without heartbeats, expired agents drop from `agent_count`.
+- `agents.registry.json` reflects accurate `first_seen/last_seen/hb_count` per agent.
+- Monitor displays correct count and last heartbeat age.
+
+## Service Definition (Req 6a)
+- Name: `seer-agents.service` (Type=simple, long-running).
+- Ordering: `After=local-fs.target`.
+- User/Group: `seer:seer`.
+- Restart: `Restart=always` with backoff (2s → 5s → 10s).
+- Hardening: `NoNewPrivileges=yes`, `ProtectSystem=full`, `ProtectHome=yes`, `PrivateTmp=yes`, `ReadWritePaths=/var/log/seer`.
+
+## Service-level acceptance
+
+- systemctl status seer-agents shows active (running) and listening on the configured UDP port.
+- On receiving valid heartbeats, agents.state and agents.registry.json update atomically.
+- Malformed heartbeats log warnings without crashing or blocking the service
 
