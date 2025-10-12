@@ -7,11 +7,8 @@ SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs 
 ## Table of Contents
 - [Req 0 — Interactive Setup & Configuration Wizard](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-0--interactive-setup--configuration-wizard)
 - [Req 1 — PCAP Capture & Ring Buffer (tcpdump)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-1--pcap-capture--ring-buffer-tcpdump)
-- [Req 1a — Service Definition for PCAP Capture (tcpdump)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-1a--service-definition-for-pcap-capture-tcpdump)
 - [Req  2 — Zeek Live Analysis via AF_PACKET](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-2--zeek-live-analysis-via-af_packet)
-- [Req 2a — Service Definition for Zeek (AF_PACKET)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-2a--service-definition-for-zeek-af_packet)
 - [Req 3 — PCAP Mover (oldest-out with export-preferred path)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-3--pcap-mover-oldest-out-with-export-preferred-path)
-- [Requirement 3a — Timer & Service Definition for Mover (unchanged + export-aware notes)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-3a--timer--service-definition-for-mover-unchanged--export-aware-notes)
 - [Req 4 — Hot-Swap / Export (External Drive Offload)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#requirement-4--hot-swap--export-external-drive-offload)
 - [Req 5 — Integrity: checksums/manifests & logging conventions](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-5--integrity-checksumsmanifests--logging-conventions)
 - [Req 6 — Agent Tracker (environment heartbeat & inventory)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-6--agent-tracker-environment-heartbeat--inventory)
@@ -19,14 +16,8 @@ SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs 
 - [Req 8 — Monitoring: TUI Console & Status API](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-8--monitoring-tui-console--status-api)
 - [Req 9 — Installer & sysctl / Kernel Tuning (deploy everything last)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-9--installer--sysctl--kernel-tuning-deploy-everything-last)
 
-[↑ Back to top](#seer-sensor--overview-summary)
-
-
-> **Optional:** Add a small “Back to top” link at the end of each section: `[↑ Back to top](#seer-sensor--overview-summary)` (adjust the anchor if you rename the summary heading).
-
-
 # Requirement 0 — Interactive Setup & Configuration Wizard
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Provide a guided, idempotent way to collect deployment parameters and produce a valid `/opt/seer/etc/seer.yml`, create required directories with correct ownership, and (optionally) enable services — without embedding business logic into other components.
 
@@ -121,7 +112,7 @@ Provide a guided, idempotent way to collect deployment parameters and produce a 
 - Downstream components (capture, Zeek, mover) must consume values from this YAML without assuming defaults.
 
 # Requirement 1 — PCAP Capture & Ring Buffer (tcpdump)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Maintain a continuous, timestamped forensic PCAP archive independent of Zeek, with predictable rotation and graceful shutdown to avoid truncated files.
 
@@ -176,7 +167,7 @@ Maintain a continuous, timestamped forensic PCAP archive independent of Zeek, wi
 - Works offline; no network dependencies.
 
 # Requirement 1a — Service Definition for PCAP Capture (tcpdump)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Provide a parameterized systemd unit to run tcpdump as a long-lived service using values from `/opt/seer/etc/seer.yml`.
 
@@ -217,7 +208,7 @@ Provide a parameterized systemd unit to run tcpdump as a long-lived service usin
 - Journald shows warnings at `disk_soft_pct` and error/pause behavior at `disk_hard_pct`.
 
 # Requirement 2 — Zeek Live Analysis via AF_PACKET
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Perform high-speed, zero-copy live traffic analysis with Zeek using AF_PACKET, outputting JSON logs for downstream processing and export.
 
@@ -271,7 +262,7 @@ Perform high-speed, zero-copy live traffic analysis with Zeek using AF_PACKET, o
 - Minimal dependencies beyond Zeek itself.
 
 # Requirement 2a — Service Definition for Zeek (AF_PACKET)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Provide a parameterized systemd unit (template) to run Zeek with AF_PACKET using values from /opt/seer/etc/seer.yml.
 
@@ -309,7 +300,7 @@ Provide a parameterized systemd unit (template) to run Zeek with AF_PACKET using
 - Stopping the service results in closed, readable log files.
 
 # Requirement 3 — PCAP Mover (oldest-out with export-preferred path)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Prevent the ring buffer from growing unbounded by moving the **oldest closed PCAP** out of `/var/seer/pcap_ring`, **preferentially to a mounted external drive** if present; otherwise, stage it in a local waiting area for later hot-swap export.
 
@@ -379,7 +370,7 @@ Prevent the ring buffer from growing unbounded by moving the **oldest closed PCA
 ---
 
 # Requirement 3a — Timer & Service Definition for Mover (unchanged + export-aware notes)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Provide a systemd **oneshot** service and **recurring timer** to trigger the mover logic at a fixed cadence and on boot, with persistence across downtime.
 
@@ -398,8 +389,9 @@ Provide a systemd **oneshot** service and **recurring timer** to trigger the mov
 - Periodic runs visible via `systemctl list-timers`.
 - With an external drive mounted, ticks route files to export; without it, ticks route to queue/backlog.
 - After reboot, first tick processes accumulated ring files due to `Persistent=true`.
-# Requirement 4 — Hot-Swap / Export (External Drive Offload)
 
+# Requirement 4 — Hot-Swap / Export (External Drive Offload)
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Automatically detect an approved external drive and **export** staged artifacts (PCAPs and Zeek JSON) to it without dropping capture, then mark the export and signal it’s safe to remove.
 
@@ -478,7 +470,7 @@ Automatically detect an approved external drive and **export** staged artifacts 
 ---
 
 # Requirement 4a — Service Definition for Hot-Swap / Export
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Provide a long-running systemd unit that continuously watches for external mounts and performs exports per Requirement 4.
 
@@ -498,7 +490,7 @@ Provide a long-running systemd unit that continuously watches for external mount
   - Limit privileges to what’s required for file IO (no network caps)
 
 # Req 5 — Integrity: checksums/manifests & logging conventions
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Guarantee file-level integrity for PCAP exports and standardize logs so operators and parsers can trust provenance, detect corruption, and audit actions.
 
@@ -624,7 +616,7 @@ Guarantee file-level integrity for PCAP exports and standardize logs so operator
 - Optionally maintain a small state file at `/var/log/seer/export.state` for the TUI/API to read.
 
 # Req 6 — Agent Tracker (environment heartbeat & inventory)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Maintain a lightweight, local inventory of deployed agents and a live **count of agents reporting**, so the monitor can display fleet health even in air-gapped deployments.
 
@@ -748,7 +740,7 @@ agent_tracker:
 - Malformed heartbeats log warnings without crashing or blocking the service
 
 # Req 7 — JSON & Agent Logs Shipper (UDP over GHOST to RAMPART)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Reliably transmit Zeek JSON and agent/service logs **one-way via UDP** across the GHOST diode to RAMPART, without acknowledgments, while preventing local buildup and avoiding interference with PCAP workflows.
 
@@ -839,7 +831,7 @@ Reliably transmit Zeek JSON and agent/service logs **one-way via UDP** across th
 - Deterministic across restarts using filesystem state only.
 
 # Req 8 — Monitoring: TUI Console & Status API
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Provide a live terminal dashboard (TUI) and a local JSON Status API summarizing SEER state:
 - Capture & Zeek health
@@ -939,7 +931,7 @@ Response body (omit sections that are missing/unknown):
 - Status API returns 200 with well-formed JSON and includes available sections.
 
 # Req 9 — Installer & sysctl / Kernel Tuning (deploy everything last)
-
+[↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
 Provide a reliable, idempotent installer that provisions the SEER runtime, deploys all systemd units, applies kernel tuning, sets ownership/permissions, and (optionally) enables services — using values from `/opt/seer/etc/seer.yml`.
 
