@@ -1,0 +1,32 @@
+[Unit]
+Description=SEER tcpdump capture on %i (Req1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seer
+Group=seer
+Environment=SEER_YAML=/opt/seer/etc/seer.yml
+ExecStartPre=/usr/bin/mkdir -p /var/seer/pcap_ring
+ExecStartPre=/usr/bin/chown seer:seer /var/seer/pcap_ring
+ExecStart=/bin/bash -c '\
+  set -euo pipefail; \
+  iface="%i"; \
+  rotate=$(python3 - <<PY
+import yaml; print(yaml.safe_load(open("/opt/seer/etc/seer.yml"))["capture"]["rotate_seconds"])
+PY
+); \
+  snap=$(python3 - <<PY
+import yaml; print(yaml.safe_load(open("/opt/seer/etc/seer.yml"))["capture"]["snaplen"])
+PY
+); \
+  /usr/sbin/tcpdump -i "$iface" -n -U -s "$snap" -G "$rotate" -Z seer \
+  -w /var/seer/pcap_ring/SEER-%Y%m%d-%H%M%S.pcap \
+'
+KillSignal=SIGINT
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

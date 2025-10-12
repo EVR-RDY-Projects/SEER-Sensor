@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install linters
+        run: |
+          pip install ruff yamllint
+
+      - name: Ruff (Python)
+        run: |
+          ruff check Automation || (echo "::warning::Ruff found issues"; exit 1)
+
+      - name: Yamllint
+        run: |
+          yamllint -s .
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@v2
+        with:
+          scandir: .
