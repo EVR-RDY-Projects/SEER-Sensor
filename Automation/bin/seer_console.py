@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SEER Split-Panel Console (Python, curses)
-import os, time, json, glob, curses, tempfile, shlex, subprocess
+import os, time, json, glob, curses, tempfile, shlex, subprocess, signal, argparse, sys
 from datetime import datetime
 
 # -------- Config (override via env) --------
@@ -12,6 +12,12 @@ MOVER_TIMER     = os.environ.get("MOVER_TIMER",     "seer-move-oldest.timer")
 
 BUFF_DIR = os.environ.get("BUFF_DIR", "/var/seer/pcap_ring")
 MGR_LOG_HINT = os.environ.get("MGR_LOG", "/var/log/seer/mover.log")
+
+# CLI / env flags
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument("--no-colors", dest="no_colors", action="store_true", help="Disable colors in the TUI")
+_args, _unknown = parser.parse_known_args()
+NO_COLORS = bool(_args.no_colors) or os.environ.get("NO_COLORS", "0") in ("1", "true", "True")
 
 def run(cmd):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -66,15 +72,36 @@ def act_start():
 def render(stdscr):
     global REFRESH
     curses.curs_set(0); stdscr.nodelay(True)
-    if curses.has_colors():
+    if curses.has_colors() and not NO_COLORS:
         curses.start_color()
-        curses.init_pair(1, curses.COLOR_RED,   -1)
-        curses.init_pair(2, curses.COLOR_GREEN, -1)
-        curses.init_pair(3, curses.COLOR_YELLOW,-1)
-        curses.init_pair(4, curses.COLOR_CYAN,  -1)
-        curses.init_pair(5, curses.COLOR_WHITE, -1)
+        # allow default background where supported
+        try:
+            curses.use_default_colors()
+        except Exception:
+            pass
+        # init pairs but be resilient to terminals that don't support extended pairs
+        try:
+            curses.init_pair(1, curses.COLOR_RED,   -1)
+            curses.init_pair(2, curses.COLOR_GREEN, -1)
+            curses.init_pair(3, curses.COLOR_YELLOW,-1)
+            curses.init_pair(4, curses.COLOR_CYAN,  -1)
+            curses.init_pair(5, curses.COLOR_WHITE, -1)
+        except curses.error:
+            # fallback to safe color pairs (no -1 background)
+            try:
+                curses.init_pair(1, curses.COLOR_RED,   curses.COLOR_BLACK)
+                curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+                curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+                curses.init_pair(4, curses.COLOR_CYAN,  curses.COLOR_BLACK)
+                curses.init_pair(5, curses.COLOR_WHITE, curses.COLOR_BLACK)
+            except Exception:
+                # give up on colors
+                pass
 
     last_key = ""
+    def handle_winch(signum, frame):
+        curses.resizeterm(*stdscr.getmaxyx())
+    signal.signal(signal.SIGWINCH, handle_winch)
     while True:
         h, w = stdscr.getmaxyx()
         compact = (w <= 64)
@@ -98,8 +125,12 @@ def render(stdscr):
         for r in range(3, 12):
             if left_w < w: stdscr.addstr(r, left_w, "|")
 
-        s, c = badge_text(cap_state); stdscr.addstr(3, 2, "  CAPTURE : "); stdscr.addstr(s, curses.color_pair(c))
-        s, c = badge_text(mov_state); stdscr.addstr(4, 2, "  MOVER   : "); stdscr.addstr(s, curses.color_pair(c))
+        s, c = badge_text(cap_state)
+        stdscr.addstr(3, 2, "  CAPTURE : ")
+        stdscr.addstr(3, 14, s, curses.color_pair(c))
+        s, c = badge_text(mov_state)
+        stdscr.addstr(4, 2, "  MOVER   : ")
+        stdscr.addstr(4, 14, s, curses.color_pair(c))
         stdscr.addstr(5, 2, f"  TIMER   : {tim_state}")
 
         stdscr.addstr(7, 0, "PCAP:")
@@ -151,5 +182,16 @@ def render(stdscr):
                 curses.reset_prog_mode()
             break
 
-def main(): curses.wrapper(render)
-if __name__ == "__main__": main()
+def main():
+    # If not running in an interactive terminal, bail out gracefully.
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("seer-console: not running in a TTY; interactive console requires a terminal.")
+        return
+    try:
+        curses.wrapper(render)
+    except curses.error as e:
+        print(f"seer-console: curses error: {e}", file=sys.stderr)
+        return
+
+if __name__ == "__main__":
+    main()

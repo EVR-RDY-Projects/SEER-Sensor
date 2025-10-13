@@ -7,6 +7,7 @@ Req0 — SEER Setup Wizard
 - Idempotent: backs up existing YAML as seer.yml.bak-YYYYmmdd-HHMMSS
 """
 
+import argparse
 import os
 import shutil
 import sys
@@ -120,17 +121,30 @@ def write_yaml(cfg: dict) -> None:
     print(f"Wrote {YAML_PATH}")
 
 
-def main() -> None:
+def main(non_interactive: bool = False) -> None:
     print("== SEER Setup Wizard ==")
     cfg = DEFAULTS.copy()
 
-    # Interface
-    while True:
-        iface = prompt_str("Network interface", cfg["interface"])
-        if iface_exists(iface):
-            cfg["interface"] = iface
-            break
-        print("  Interface not found. (Tip: run `ip link` to list names.)")
+    if non_interactive:
+        # Use defaults but validate interface exists; fallback to first non-loopback
+        default_iface = cfg["interface"]
+        if iface_exists(default_iface):
+            cfg["interface"] = default_iface
+        else:
+            # try to pick one from /sys/class/net
+            for p in Path('/sys/class/net').iterdir():
+                if p.name != 'lo' and iface_exists(p.name):
+                    cfg['interface'] = p.name
+                    break
+        # use defaults for other values
+    else:
+        # Interface
+        while True:
+            iface = prompt_str("Network interface", cfg["interface"])
+            if iface_exists(iface):
+                cfg["interface"] = iface
+                break
+            print("  Interface not found. (Tip: run `ip link` to list names.)")
 
     # Capture params
     cfg["capture"]["snaplen"] = prompt_int(
@@ -190,9 +204,16 @@ def main() -> None:
     print("Done. Next: install/start capture and mover services.")
 
 
-if __name__ == "__main__":
+def cli_main():
+    p = argparse.ArgumentParser(description='SEER setup wizard (interactive)')
+    p.add_argument('--yes', '-y', action='store_true', help='Use defaults and be non-interactive')
+    args = p.parse_args()
     try:
-        main()
+        main(non_interactive=args.yes)
     except KeyboardInterrupt:
         print("\nAborted.")
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    cli_main()

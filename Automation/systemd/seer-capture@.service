@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 # Run as root so tcpdump can open the interface; it will drop to user 'seer' via -Z
-ExecStart=/usr/bin/seer-capture.sh %i
+ExecStart=/usr/local/bin/seer-capture.sh %i
 KillSignal=SIGINT
 Restart=always
 RestartSec=2

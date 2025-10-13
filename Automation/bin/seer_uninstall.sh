@@ -76,10 +76,11 @@ ok "systemd units removed and daemon reloaded"
 
 say "3) Remove installed binaries"
 rm -f /usr/local/bin/seer-capture.sh \
-      /usr/local/bin/seer_console.py \
-      /usr/local/bin/seer-console
-# Remove legacy stray copy if it exists (we standardized on /usr/local/bin)
+  /usr/local/bin/seer_console.py \
+  /usr/local/bin/seer-console
+# Remove legacy stray copy if it exists (some systems may have installed to /usr/bin)
 [[ -f /usr/bin/seer-capture.sh ]] && rm -f /usr/bin/seer-capture.sh || true
+[[ -f /usr/bin/seer-console ]] && rm -f /usr/bin/seer-console || true
 ok "binaries removed"
 
 if [[ $PURGE -eq 1 ]]; then

@@ -6,5 +6,5 @@ After=network-online.target
 Type=oneshot
 User=seer
 Group=seer
-ExecStart=/usr/bin/env python3 /home/seer/code/SEER-Sensor/Automation/SEER/move_oldest.py
+ExecStart=/usr/bin/env python3 /usr/local/bin/seer-move-oldest.py
 
