@@ -1,9 +1,10 @@
+---
 name: CI
 
 on:
   pull_request:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   lint:
@@ -21,12 +22,10 @@ jobs:
           pip install ruff yamllint
 
       - name: Ruff (Python)
-        run: |
-          ruff check Automation || (echo "::warning::Ruff found issues"; exit 1)
+        run: ruff check Automation
 
       - name: Yamllint
-        run: |
-          yamllint -s .
+        run: yamllint -s .
 
       - name: ShellCheck
         uses: ludeeus/action-shellcheck@master
