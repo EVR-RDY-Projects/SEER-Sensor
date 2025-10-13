@@ -55,6 +55,63 @@ SEER is a modular, air-gap-friendly network forensics sensor. It captures PCAPs 
 - [Req 8 — Monitoring: TUI Console & Status API](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-8--monitoring-tui-console--status-api)
 - [Req 9 — Installer & sysctl / Kernel Tuning (deploy everything last)](https://github.com/EVR-RDY-Projects/SEER-Sensor/blob/main/Automation/SEER/Requirements.md#req-9--installer--sysctl--kernel-tuning-deploy-everything-last)
 
+# 🚀 Launch (installer & console)
+
+Quick start — fresh install
+
+1. (Optional) Clean uninstall (if this host previously had SEER installed):
+
+```bash
+sudo bash Automation/bin/seer_uninstall.sh --yes
+```
+
+2. Run the installer (non-interactive defaults):
+
+```bash
+sudo -E bash Automation/install.sh
+```
+
+Notes:
+- The installer runs the setup wizard in `--yes` mode, installs helper scripts to `/usr/local/bin`, deploys systemd unit templates to `/etc/systemd/system/`, enables and starts the capture instance for the configured interface, and runs a post-install verifier.
+- You may be prompted for `sudo` password.
+
+3. Run verifier (manual):
+
+```bash
+sudo /usr/local/bin/seer-verify-install.sh
+```
+
+4. Open the interactive console (requires a TTY):
+
+```bash
+/usr/local/bin/seer-console
+```
+
+Console quick keys:
+- `q` : quit
+- `1` : Stop All (capture + mover)
+- `2` : Clear PCAPs (deletes files in ring)
+- `3` : Start/Restart services
+- `+` / `-` : change UI refresh rate
+- `j` : JSON spool listing (placeholder)
+- `p` : Shipper status (placeholder)
+- `a` : Agent heuristics (placeholder)
+
+Troubleshooting
+- If a systemd unit fails because it cannot find an executable, confirm unit files reference `/usr/local/bin/*` and run `sudo systemctl daemon-reload`.
+- The verifier will create harmless dummy PCAPs during post-install to exercise the mover if the ring is empty; that's expected for test installs.
+- The console requires a real TTY; if you see curses errors when running it from scripts, run it directly in a terminal.
+
+Advanced
+- For custom configuration, run the interactive setup wizard first and then run the installer:
+
+```bash
+sudo -E Automation/SEER/setup_wizard.py
+sudo -E bash Automation/install.sh
+```
+
+The wizard writes `/opt/seer/etc/seer.yml`. Review it before enabling services for production.
+
 # Requirement 0 — Interactive Setup & Configuration Wizard
 [↑ Back to top](#seer-sensor--overview-summary)
 ## Purpose
