@@ -25,6 +25,18 @@ NO_COLORS = bool(_args.no_colors) or os.environ.get("NO_COLORS", "0") in ("1", "
 def run(cmd):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
+
+def read_cfg():
+    """Read /opt/seer/etc/seer.yml if present and return dict; safe fallback."""
+    path = "/opt/seer/etc/seer.yml"
+    try:
+        import yaml
+        with open(path) as f:
+            cfg = yaml.safe_load(f) or {}
+        return cfg
+    except Exception:
+        return {}
+
 def systemctl_is_active(unit):
     if not unit: return "inactive"
     r = run(["systemctl","is-active",unit])
@@ -120,7 +132,14 @@ def render(stdscr):
         mov_state = systemctl_is_active(MOVER_SERVICE)
         tim_state = systemctl_is_active(MOVER_TIMER) if MOVER_TIMER else "n/a"
 
-        buff_count = count_pcaps(BUFF_DIR)
+    buff_count = count_pcaps(BUFF_DIR)
+
+    # read configured destinations (dynamic) and count pcaps there
+    cfg = read_cfg()
+    dest_dir = cfg.get('dest_dir', '/opt/seer/var/queue')
+    backlog_dir = cfg.get('backlog_dir', '/opt/seer/var/backlog')
+    dest_count = count_pcaps(dest_dir)
+    back_count = count_pcaps(backlog_dir)
 
         left_w = max(28, (w*2)//3); right_w = max(22, w-left_w-1)
         draw_text(stdscr, 2, 0, left_w,  f"+ SYSTEM {'-'*(max(0,left_w-10))}")
@@ -136,15 +155,12 @@ def render(stdscr):
         stdscr.addstr(4, 14, s, curses.color_pair(c))
         stdscr.addstr(5, 2, f"  TIMER   : {tim_state}")
 
-        stdscr.addstr(7, 0, "PCAP:")
-        stdscr.addstr(8, 2, f"  Buffer count: {buff_count:<5} (dir: {BUFF_DIR})")
-        stdscr.addstr(10,2, f"  Mover log: {MGR_LOG_HINT}")
-    stdscr.addstr(11,2, f"  JSON spool: {JSON_SPOOL}")
-
-    # right-side placeholders for future features
-    stdscr.addstr(13, left_w+2, "[j] JSON Spool")
-    stdscr.addstr(14, left_w+2, "[p] Shipper Status")
-    stdscr.addstr(15, left_w+2, "[a] Agent Heuristics")
+    stdscr.addstr(7, 0, "PCAP:")
+    stdscr.addstr(8, 2, f"  Buffer count: {buff_count:<5} (dir: {BUFF_DIR})")
+    stdscr.addstr(9, 2, f"  Dest count  : {dest_count:<5} (dir: {dest_dir})")
+    stdscr.addstr(10,2, f"  Backlog cnt : {back_count:<5} (dir: {backlog_dir})")
+    stdscr.addstr(11,2, f"  Mover log   : {MGR_LOG_HINT}")
+    stdscr.addstr(12,2, f"  JSON spool  : {JSON_SPOOL}")
 
         stdscr.addstr(3, left_w+2, "[1] Stop All")
         stdscr.addstr(4, left_w+2, "[2] Clear PCAPs")
