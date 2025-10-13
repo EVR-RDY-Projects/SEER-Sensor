@@ -24,6 +24,12 @@ cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml'))
 print(cfg.get('ring_dir','/var/seer/pcap_ring'))
 PY
 )
+thresh=$(python3 - <<'PY'
+import yaml
+cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml'))
+print(int(cfg.get('buffer_threshold',4)))
+PY
+)
 dest_dir=$(python3 - <<'PY'
 import yaml
 cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml'))
@@ -48,13 +54,36 @@ echo "Verifier: ring_dir=$ring_dir dest_dir=$dest_dir backlog_dir=$backlog_dir i
 count_before=$(ls -1 ${ring_dir}/*.pcap* 2>/dev/null | wc -l || true)
 echo "PCAPs in ring before: ${count_before}"
 
+# If the ring doesn't have enough files to trigger the mover, create harmless dummy
+# closed pcap files (older mtime) so the mover can operate deterministically during
+# automated install verification.
+if [[ ${count_before} -lt ${thresh} ]]; then
+  need=$((thresh - count_before))
+  echo "Creating ${need} dummy pcap(s) in ring to meet threshold ${thresh}"
+  for i in $(seq 1 ${need}); do
+    fn="${ring_dir}/SEER-DUMMY-$(date +%s)-${i}.pcap"
+    mkdir -p "${ring_dir}" || true
+    # create a tiny file and mark it as older than QUIET_SECS used by mover
+    dd if=/dev/zero of="${fn}" bs=1 count=1 >/dev/null 2>&1 || true
+    chown seer:seer "${fn}" 2>/dev/null || true
+    # make the mtime safely older than mover's QUIET_SECS (use 10s)
+    touch -d '10 seconds ago' "${fn}" || true
+  done
+  # refresh count
+  count_before=$(ls -1 ${ring_dir}/*.pcap* 2>/dev/null | wc -l || true)
+  echo "PCAPs in ring after adding dummies: ${count_before}"
+fi
+
 # record latest mtime in dest/backlog
 latest_dest_before=$(ls -1t ${dest_dir} 2>/dev/null | head -n1 || true)
 latest_back_before=$(ls -1t ${backlog_dir} 2>/dev/null | head -n1 || true)
 
 echo "Triggering mover (oneshot)"
+# Stop capture briefly to avoid tcpdump creating new files during the oneshot test
+sudo systemctl stop seer-capture@${iface}.service || true
 sudo systemctl start seer-move-oldest.service || true
 sleep 3
+sudo systemctl start seer-capture@${iface}.service || true
 
 count_after=$(ls -1 ${ring_dir}/*.pcap* 2>/dev/null | wc -l || true)
 echo "PCAPs in ring after: ${count_after}"
