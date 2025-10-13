@@ -3,4 +3,4 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-extend-select = ["W","E","F","I"]
+extend-select = ["W", "E", "F", "I"]
