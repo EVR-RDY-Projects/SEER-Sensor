@@ -7,8 +7,13 @@ Req0 — SEER Setup Wizard
 - Idempotent: backs up existing YAML as seer.yml.bak-YYYYmmdd-HHMMSS
 """
 
-import os, sys, shutil, time, yaml, subprocess
+import os
+import shutil
+import sys
+import time
 from pathlib import Path
+
+import yaml
 
 DEFAULTS = {
     "interface": "enp1s0",

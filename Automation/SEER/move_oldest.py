@@ -5,8 +5,11 @@ Req3 — Move oldest closed PCAP from ring -> dest when count >= threshold.
 - Writes a simple log line to mover_log.
 """
 
-import time, yaml, shutil
+import shutil
+import time
 from pathlib import Path
+
+import yaml
 
 CFG = yaml.safe_load(open("/opt/seer/etc/seer.yml"))
 RING = Path(CFG["ring_dir"])
