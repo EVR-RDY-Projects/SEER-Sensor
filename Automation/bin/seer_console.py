@@ -12,6 +12,9 @@ MOVER_TIMER     = os.environ.get("MOVER_TIMER",     "seer-move-oldest.timer")
 
 BUFF_DIR = os.environ.get("BUFF_DIR", "/var/seer/pcap_ring")
 MGR_LOG_HINT = os.environ.get("MGR_LOG", "/var/log/seer/mover.log")
+JSON_SPOOL = os.environ.get("JSON_SPOOL", "/var/seer/json_spool")
+SHIPPER_SERVICE = os.environ.get("SHIPPER_SERVICE", "seer-shipper.service")
+AGENT_SERVICE = os.environ.get("AGENT_SERVICE", "seer-agent.service")
 
 # CLI / env flags
 parser = argparse.ArgumentParser(add_help=False)
@@ -136,6 +139,12 @@ def render(stdscr):
         stdscr.addstr(7, 0, "PCAP:")
         stdscr.addstr(8, 2, f"  Buffer count: {buff_count:<5} (dir: {BUFF_DIR})")
         stdscr.addstr(10,2, f"  Mover log: {MGR_LOG_HINT}")
+    stdscr.addstr(11,2, f"  JSON spool: {JSON_SPOOL}")
+
+    # right-side placeholders for future features
+    stdscr.addstr(13, left_w+2, "[j] JSON Spool")
+    stdscr.addstr(14, left_w+2, "[p] Shipper Status")
+    stdscr.addstr(15, left_w+2, "[a] Agent Heuristics")
 
         stdscr.addstr(3, left_w+2, "[1] Stop All")
         stdscr.addstr(4, left_w+2, "[2] Clear PCAPs")
@@ -179,6 +188,23 @@ def render(stdscr):
                 curses.def_prog_mode(); curses.endwin()
                 units = " ".join([shlex.quote(CAPTURE_SERVICE), shlex.quote(MOVER_SERVICE)] + ([shlex.quote(MOVER_TIMER)] if MOVER_TIMER else []))
                 os.system(f"systemctl status {units} --no-pager -l | less -SRX")
+                curses.reset_prog_mode()
+            elif ch in (ord('j'), ord('J')):
+                # show recent files or tail of json spool directory
+                curses.def_prog_mode(); curses.endwin()
+                echo = f"ls -lt {shlex.quote(JSON_SPOOL)} | head -n 200"
+                os.system(echo + " | sed -n '1,200p' | less -SRX")
+                curses.reset_prog_mode()
+            elif ch in (ord('p'), ord('P')):
+                curses.def_prog_mode(); curses.endwin()
+                # shipper service logs/status (placeholder)
+                os.system(f"systemctl status {shlex.quote(SHIPPER_SERVICE)} --no-pager -l | less -SRX")
+                curses.reset_prog_mode()
+            elif ch in (ord('a'), ord('A')):
+                curses.def_prog_mode(); curses.endwin()
+                # agent heuristics placeholder: show a short help text
+                cat = 'echo "Agent heuristics: (placeholder)\n- rule1: ...\n- rule2: ...\n" | less -SRX'
+                os.system(cat)
                 curses.reset_prog_mode()
             break
 
