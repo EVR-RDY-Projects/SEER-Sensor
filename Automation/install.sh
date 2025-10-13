@@ -13,38 +13,42 @@ if ! command -v tcpdump >/dev/null 2>&1; then
   sudo apt-get install -y tcpdump
 fi
 
+# Resolve repository root (so script can be run from any cwd)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # install wrapper (standardize to /usr/local/bin)
 echo "Installing /usr/local/bin/seer-capture.sh"
-sudo install -m 0755 Automation/bin/seer-capture.sh /usr/local/bin/seer-capture.sh
+sudo install -m 0755 "$REPO_ROOT/Automation/bin/seer-capture.sh" /usr/local/bin/seer-capture.sh
 
 # install unit
 echo "Installing systemd unit"
-sudo install -m 0644 Automation/systemd/seer-capture@.service /etc/systemd/system/seer-capture@.service
+sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-capture@.service" /etc/systemd/system/seer-capture@.service
 
 # reload units
 sudo systemctl daemon-reload
 echo "Running setup wizard (non-interactive defaults)"
-sudo -E Automation/SEER/setup_wizard.py --yes || true
+sudo -E "$REPO_ROOT/Automation/SEER/setup_wizard.py" --yes || true
 
 # Install mover script and units if present
-if [[ -f Automation/SEER/move_oldest.py ]]; then
+if [[ -f "$REPO_ROOT/Automation/SEER/move_oldest.py" ]]; then
   echo "Installing mover script to /usr/local/bin/seer-move-oldest.py"
-  sudo install -m 0755 Automation/SEER/move_oldest.py /usr/local/bin/seer-move-oldest.py
+  sudo install -m 0755 "$REPO_ROOT/Automation/SEER/move_oldest.py" /usr/local/bin/seer-move-oldest.py
 fi
 
 # Install console (TUI) to /usr/local/bin
-if [[ -f Automation/bin/seer_console.py ]]; then
+if [[ -f "$REPO_ROOT/Automation/bin/seer_console.py" ]]; then
   echo "Installing seer-console to /usr/local/bin/seer-console"
-  sudo install -m 0755 Automation/bin/seer_console.py /usr/local/bin/seer-console
+  sudo install -m 0755 "$REPO_ROOT/Automation/bin/seer_console.py" /usr/local/bin/seer-console
 fi
 
-if [[ -f Automation/systemd/seer-move-oldest.service ]]; then
+if [[ -f "$REPO_ROOT/Automation/systemd/seer-move-oldest.service" ]]; then
   echo "Installing seer-move-oldest.service"
-  sudo install -m 0644 Automation/systemd/seer-move-oldest.service /etc/systemd/system/seer-move-oldest.service
+  sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-move-oldest.service" /etc/systemd/system/seer-move-oldest.service
 fi
-if [[ -f Automation/systemd/seer-move-oldest.timer ]]; then
+if [[ -f "$REPO_ROOT/Automation/systemd/seer-move-oldest.timer" ]]; then
   echo "Installing seer-move-oldest.timer"
-  sudo install -m 0644 Automation/systemd/seer-move-oldest.timer /etc/systemd/system/seer-move-oldest.timer
+  sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-move-oldest.timer" /etc/systemd/system/seer-move-oldest.timer
 fi
 
 echo "Reloading systemd daemon and enabling services"
@@ -80,9 +84,9 @@ sudo journalctl -u seer-capture@${INTERFACE}.service -n 30 --no-pager || true
 echo "Install finished. If setup wrote /opt/seer/etc/seer.yml, review it and adjust as needed."
 
 # Install verifier and run it
-if [[ -f Automation/bin/seer-verify-install.sh ]]; then
+if [[ -f "$REPO_ROOT/Automation/bin/seer-verify-install.sh" ]]; then
   echo "Installing verifier to /usr/local/bin/seer-verify-install.sh"
-  sudo install -m 0755 Automation/bin/seer-verify-install.sh /usr/local/bin/seer-verify-install.sh
+  sudo install -m 0755 "$REPO_ROOT/Automation/bin/seer-verify-install.sh" /usr/local/bin/seer-verify-install.sh
   echo "Running post-install verification (this may trigger mover once)"
   sudo /usr/local/bin/seer-verify-install.sh || {
     echo "Post-install verification failed. Check journalctl -u seer-move-oldest.service and seer-capture logs." >&2
