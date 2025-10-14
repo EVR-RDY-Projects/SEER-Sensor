@@ -136,7 +136,13 @@ def main(non_interactive: bool = False) -> None:
                 if p.name != 'lo' and iface_exists(p.name):
                     cfg['interface'] = p.name
                     break
-        # use defaults for other values
+        # Non-interactive: write defaults and exit early
+        ensure_seer_user()
+        ensure_dirs()
+        backup_yaml()
+        write_yaml(cfg)
+        print("Done. Next: install/start capture and mover services.")
+        return
     else:
         # Interface
         while True:

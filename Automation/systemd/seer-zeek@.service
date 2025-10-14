@@ -1,0 +1,18 @@
+[Unit]
+Description=SEER Zeek Live Analysis (AF_PACKET) on %I
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env bash /usr/local/bin/seer-zeek.sh start
+ExecStop=/usr/bin/env bash /usr/local/bin/seer-zeek.sh stop
+ExecReload=/usr/bin/env bash /usr/local/bin/seer-zeek.sh restart
+Restart=on-failure
+User=root
+Group=root
+Environment=IFACE=%I LOG_DIR=/var/seer/json_spool LOG_FLAT=1 SYSTEMD=1
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/opt/zeek/bin
+PIDFile=/run/zeek.pid
+
+[Install]
+WantedBy=multi-user.target

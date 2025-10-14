@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# seer-zeek.sh — start/stop/status/pcap helper for Zeek with JSON logs
-# Usage:
-#   sudo ./seer-zeek.sh start         # live capture
-#   sudo ./seer-zeek.sh stop
-#   ./seer-zeek.sh status
-#   sudo ./seer-zeek.sh pcap /path/to/file.pcap   # run on a pcap once
+# seer-zeek.sh — start/stop/status/restart helper for Zeek with JSON logs
+# Expected env (overridable): IFACE, LOG_DIR, LOG_FLAT, SYSTEMD, PIDFILE, LOCKFILE
+# Systemd usage: the service sets SYSTEMD=1 to run in foreground with exec
 
 set -euo pipefail
+
+# Ensure /opt/zeek is in PATH for direct invocation when run outside login shells
+export PATH="/opt/zeek/bin:${PATH}"
 
 # ---- CONFIG (override via env: IFACE=eth0 LOG_DIR=/data/zeek etc.) ----
 IFACE="${IFACE:-enp1s0}"
 LOG_DIR="${LOG_DIR:-/var/log/zeek}"
-PIDFILE="${PIDFILE:-/var/run/zeek.pid}"
-LOCKFILE="${LOCKFILE:-/var/run/zeek-start.lock}"
+PIDFILE="${PIDFILE:-/run/zeek.pid}"
+LOCKFILE="${LOCKFILE:-/run/zeek-start.lock}"
+SYSTEMD="${SYSTEMD:-0}"
+
+"${LOG_FLAT:-}" >/dev/null 2>&1 || true # silence shellcheck for unbound in debug
 
 # Zeek scripts to enable (keep minimal/robust)
 ZEEKSCRIPTS=(
@@ -26,7 +29,7 @@ is_zeek(){ ps -p "$1" -o comm= 2>/dev/null | grep -qx zeek; }
 have(){ command -v "$1" >/dev/null 2>&1; }
 
 ensure_env() {
-  have zeek || die "zeek not found in PATH"
+  have zeek || die "zeek not found in PATH (PATH=$PATH)"
 }
 
 ensure_iface() {
@@ -34,8 +37,11 @@ ensure_iface() {
 }
 
 ensure_dirs() {
-  sudo mkdir -p "$LOG_DIR"
-  sudo chown "$(id -u)":"$(id -g)" "$LOG_DIR" 2>/dev/null || true
+  mkdir -p "$LOG_DIR"
+  # If running as root via systemd, leave ownership as-is; otherwise chown to current user
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    chown "$(id -u)":"$(id -g)" "$LOG_DIR" 2>/dev/null || true
+  fi
 }
 
 latest_run_dir() {
@@ -64,31 +70,45 @@ start_zeek_live() {
     rm -f "$PIDFILE"
   fi
 
-  RUN_DIR="${LOG_DIR}/$(date +'%Y%m%d-%H%M%S')"
+  # Determine output directory
+  if [ "${LOG_FLAT:-0}" = "1" ]; then
+    RUN_DIR="${LOG_DIR}"
+  else
+    RUN_DIR="${LOG_DIR}/$(date +'%Y%m%d-%H%M%S')"
+  fi
   mkdir -p "$RUN_DIR"
 
   OUTFILE="${LOG_DIR}/zeek.out"
   ERRFILE="${LOG_DIR}/zeek.err"
 
   echo "Starting Zeek on ${IFACE}; logs -> ${RUN_DIR}"
+  echo "[DEBUG] ENV: IFACE=$IFACE LOG_DIR=$LOG_DIR LOG_FLAT=${LOG_FLAT:-unset} SYSTEMD=${SYSTEMD:-unset} PATH=$PATH"
 
-  # -C ignores bad checksums; JSON via LogAscii::use_json=T
-  nohup zeek -C -i "$IFACE" \
-    "${ZEEKSCRIPTS[@]}" \
-    -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;" \
-    >"$OUTFILE" 2>"$ERRFILE" < /dev/null &
-
-  ZPID=$!
-  echo "$ZPID" | sudo tee "$PIDFILE" >/dev/null
-
-  sleep 1
-  if is_zeek "$ZPID"; then
-    echo "Zeek started (PID $ZPID)."
-    echo "Stdout/Stderr: $OUTFILE  $ERRFILE"
+  if [ "$SYSTEMD" = "1" ]; then
+    # Foreground mode for systemd: let zeek become the main process
+    echo "[DEBUG] Exec: zeek -C -i $IFACE ${ZEEKSCRIPTS[*]} -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
+    exec zeek -C -i "$IFACE" \
+      "${ZEEKSCRIPTS[@]}" \
+      -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;"
   else
-    echo "Zeek failed to start. See $ERRFILE"
-    rm -f "$PIDFILE"
-    exit 1
+    # Background mode for manual usage
+    echo "[DEBUG] Spawn (bg): zeek -C -i $IFACE ${ZEEKSCRIPTS[*]} -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
+    nohup zeek -C -i "$IFACE" \
+      "${ZEEKSCRIPTS[@]}" \
+      -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;" \
+      >"$OUTFILE" 2>"$ERRFILE" < /dev/null &
+    ZPID=$!
+    echo "$ZPID" > "$PIDFILE"
+
+    sleep 1
+    if is_zeek "$ZPID"; then
+      echo "Zeek started (PID $ZPID)."
+      echo "Stdout/Stderr: $OUTFILE  $ERRFILE"
+    else
+      echo "Zeek failed to start. See $ERRFILE"
+      rm -f "$PIDFILE"
+      exit 1
+    fi
   fi
 }
 
@@ -132,32 +152,16 @@ status_zeek() {
   [ -n "$LRD" ] && echo "Last log dir: $LRD"
 }
 
-pcap_once() {
-  ensure_env
-  ensure_dirs
-  PCAP="${1:-}"
-  [ -n "$PCAP" ] || die "Usage: $0 pcap /path/to/file.pcap"
-  [ -r "$PCAP" ] || die "PCAP not readable: $PCAP"
-
-  RUN_DIR="${LOG_DIR}/pcap-$(date +'%Y%m%d-%H%M%S')"
-  mkdir -p "$RUN_DIR"
-  echo "Processing PCAP -> $RUN_DIR"
-
-  zeek -r "$PCAP" \
-    "${ZEEKSCRIPTS[@]}" \
-    -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;"
-
-  echo "Done. Example:"
-  for f in conn.log dns.log; do
-    [ -f "$RUN_DIR/$f" ] && { echo "$RUN_DIR/$f"; head -n 2 "$RUN_DIR/$f" || true; }
-  done
+restart_zeek() {
+  stop_zeek || true
+  start_zeek_live
 }
 
-# ---- DISPATCH ----
+# ---- CLI ----
 case "${1:-}" in
-  start)  start_zeek_live ;;
-  stop)   stop_zeek ;;
-  status) status_zeek ;;
-  pcap)   shift; pcap_once "${1:-}";;
-  *) echo "Usage: $0 {start|stop|status|pcap <file.pcap>}"; exit 1 ;;
+  start)    start_zeek_live ;;
+  stop)     stop_zeek ;;
+  restart)  restart_zeek ;;
+  status)   status_zeek ;;
+  *)        echo "Usage: $0 {start|stop|restart|status}"; exit 1 ;;
 esac

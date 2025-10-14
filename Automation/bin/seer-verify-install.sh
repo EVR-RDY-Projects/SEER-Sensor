@@ -49,7 +49,15 @@ print(cfg.get('interface','enp1s0'))
 PY
 )
 
+json_spool=$(python3 - <<'PY'
+import yaml
+cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml'))
+print(cfg.get('json_spool','/var/seer/json_spool'))
+PY
+)
+
 echo "Verifier: ring_dir=$ring_dir dest_dir=$dest_dir backlog_dir=$backlog_dir iface=$iface"
+echo "Verifier: json_spool=$json_spool"
 
 count_before=$(ls -1 ${ring_dir}/*.pcap* 2>/dev/null | wc -l || true)
 echo "PCAPs in ring before: ${count_before}"
@@ -115,7 +123,28 @@ else
   capture_ok=0
 fi
 
-if [[ ${moved} -eq 1 && ${capture_ok} -eq 1 ]]; then
+# Check zeek service active
+if systemctl is-active --quiet seer-zeek@${iface}.service; then
+  echo "OK: seer-zeek@${iface} is active"
+  zeek_ok=1
+else
+  echo "FAIL: seer-zeek@${iface} not active"
+  zeek_ok=0
+fi
+
+# Check Zeek is writing logs into json_spool
+zc_before=$(ls -1 ${json_spool}/*.log ${json_spool}/*.json* 2>/dev/null | wc -l || true)
+sleep 2
+zc_after=$(ls -1 ${json_spool}/*.log ${json_spool}/*.json* 2>/dev/null | wc -l || true)
+if [[ ${zc_after} -gt 0 ]]; then
+  echo "OK: Zeek logs detected in json_spool (${zc_after})"
+  logs_ok=1
+else
+  echo "FAIL: no Zeek logs found in json_spool"
+  logs_ok=0
+fi
+
+if [[ ${moved} -eq 1 && ${capture_ok} -eq 1 && ${zeek_ok} -eq 1 && ${logs_ok} -eq 1 ]]; then
   echo "Verification PASSED"
   exit 0
 else
