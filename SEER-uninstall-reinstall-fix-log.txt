@@ -1,0 +1,62 @@
+SEER-Sensor Uninstall/Reinstall Reliability Fix Log
+=====================================================
+
+Date: October 13, 2025
+
+Summary:
+--------
+This document records all troubleshooting, fixes, and improvements made to ensure SEER-Sensor can be reliably uninstalled and reinstalled, with all services (especially Zeek) starting automatically and passing verification.
+
+Major Changes:
+--------------
+1. install.sh
+   - Fixed logic to reliably enable/start seer-zeek@<iface> after uninstall/reinstall.
+   - Now checks for the actual systemd unit file instead of relying on systemctl cache.
+   - Improved non-interactive setup wizard handling and apt install robustness.
+
+2. uninstall.sh
+   - Fully removes Zeek service, binaries, and logs.
+   - Now stops/disables all SEER services, including seer-zeek@*.service.
+   - Cleans up /opt/seer, /var/seer, /var/log/zeek, and pcap_ring.
+
+3. seer-zeek.sh
+   - Modernized for robust systemd and manual operation.
+   - Supports foreground exec for systemd, background for manual.
+   - Added restart action and improved PID/lock handling.
+   - Ensures /opt/zeek/bin is always in PATH.
+
+4. seer_console.py
+   - TUI now shows Zeek status, JSON log count, and provides start/stop controls.
+   - Improved error handling and dynamic config reading.
+
+5. seer-verify-install.sh
+   - Now checks Zeek service status and verifies JSON logs are being generated.
+   - Improved mover/capture verification logic.
+
+6. systemd/seer-zeek@.service
+   - Added/updated systemd unit for Zeek live analysis.
+   - Uses foreground exec, proper environment, and PID tracking.
+
+7. SEER/Setup Wizard
+   - Improved non-interactive mode reliability and config backup.
+
+Troubleshooting & Solution:
+--------------------------
+- Problem: After uninstall/reinstall, Zeek service was not starting automatically; manual intervention was required.
+- Root Cause: install.sh used systemctl list-unit-files to detect the Zeek unit, which was unreliable after daemon-reload.
+- Solution: Changed detection to check for the actual unit file, ensuring Zeek is always enabled and started.
+- Verified by multiple uninstall/reinstall cycles; all services now start automatically and verification passes.
+
+How to Use:
+-----------
+- To uninstall: Automation/bin/seer_uninstall.sh --purge --yes
+- To reinstall: Automation/install.sh --yes
+- All services (capture, Zeek, mover) will start automatically.
+- Use seer-console for live status and controls.
+- Run seer-verify-install.sh for full system verification.
+
+Commit Details:
+---------------
+- See commit 8f2e85f for full code changes and troubleshooting notes.
+
+End of Log

@@ -1,6 +1,7 @@
 [Unit]
 Description=SEER Zeek Live Analysis (AF_PACKET) on %I
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -12,7 +13,17 @@ User=root
 Group=root
 Environment=IFACE=%I LOG_DIR=/var/seer/json_spool LOG_FLAT=1 SYSTEMD=1
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/opt/zeek/bin
-PIDFile=/run/zeek.pid
+Environment=PIDFILE=/run/zeek-%I.pid
+Environment=LOCKFILE=/run/zeek-%I.lock
+PIDFile=/run/zeek-%I.pid
+SyslogIdentifier=seer-zeek
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/seer/json_spool /var/log/seer
 
 [Install]
 WantedBy=multi-user.target

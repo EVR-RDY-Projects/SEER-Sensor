@@ -1,0 +1,12 @@
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Local env
+.venv/
+venv/
+.env
+
+# Editors
+.vscode/
+.idea/

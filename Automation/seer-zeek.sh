@@ -81,20 +81,45 @@ start_zeek_live() {
   OUTFILE="${LOG_DIR}/zeek.out"
   ERRFILE="${LOG_DIR}/zeek.err"
 
-  echo "Starting Zeek on ${IFACE}; logs -> ${RUN_DIR}"
+  # Read AF_PACKET settings from YAML (zeek_workers, fanout_id)
+  ZE_WORKERS=$(python3 - <<'PY'
+import yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    print(int(cfg.get('zeek_workers',2)))
+except Exception:
+    print(2)
+PY
+)
+  FANOUT_ID=$(python3 - <<'PY'
+import yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    print(int(cfg.get('fanout_id',42)))
+except Exception:
+    print(42)
+PY
+)
+
+  # Build AF_PACKET redefs
+  AF_REDEFS="redef AF_Packet::fanout_id=${FANOUT_ID}; redef AF_Packet::interfaces += { [\$name=\"${IFACE}\", \$threads=${ZE_WORKERS}] };"
+
+  echo "Starting Zeek on ${IFACE} (AF_PACKET workers=${ZE_WORKERS} fanout=${FANOUT_ID}); logs -> ${RUN_DIR}"
   echo "[DEBUG] ENV: IFACE=$IFACE LOG_DIR=$LOG_DIR LOG_FLAT=${LOG_FLAT:-unset} SYSTEMD=${SYSTEMD:-unset} PATH=$PATH"
 
   if [ "$SYSTEMD" = "1" ]; then
     # Foreground mode for systemd: let zeek become the main process
-    echo "[DEBUG] Exec: zeek -C -i $IFACE ${ZEEKSCRIPTS[*]} -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
-    exec zeek -C -i "$IFACE" \
+    echo "[DEBUG] Exec: zeek -C -i af_packet::$IFACE ${ZEEKSCRIPTS[*]} -e '$AF_REDEFS' -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
+    exec zeek -C -i "af_packet::$IFACE" \
       "${ZEEKSCRIPTS[@]}" \
+      -e "$AF_REDEFS" \
       -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;"
   else
     # Background mode for manual usage
-    echo "[DEBUG] Spawn (bg): zeek -C -i $IFACE ${ZEEKSCRIPTS[*]} -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
-    nohup zeek -C -i "$IFACE" \
+    echo "[DEBUG] Spawn (bg): zeek -C -i af_packet::$IFACE ${ZEEKSCRIPTS[*]} -e '$AF_REDEFS' -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
+    nohup zeek -C -i "af_packet::$IFACE" \
       "${ZEEKSCRIPTS[@]}" \
+      -e "$AF_REDEFS" \
       -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;" \
       >"$OUTFILE" 2>"$ERRFILE" < /dev/null &
     ZPID=$!

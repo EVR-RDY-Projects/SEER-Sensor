@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 DEFAULTS = {
-    "interface": "enp1s0",
+    "interface": "enp2s0",
     "fanout_id": 42,
     "zeek_workers": 2,
     "refresh_interval": 0.5,
@@ -32,6 +32,15 @@ DEFAULTS = {
         "rotate_seconds": 20,
         "disk_soft_pct": 80,
         "disk_hard_pct": 90,
+    },
+    "export": {
+        "mount_candidates": [
+            "/mnt/seer_external",
+            "/mnt/SEER_EXT",
+            "/media/seer_external"
+        ],
+        "min_free_pct": 2,
+        "poll_interval": 2,
     },
 }
 

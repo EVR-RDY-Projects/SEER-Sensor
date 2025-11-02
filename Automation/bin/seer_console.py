@@ -12,11 +12,12 @@ import signal
 import argparse
 import sys
 from datetime import datetime
+from pathlib import Path
 
 # -------- Config (override via env) --------
 REFRESH = float(os.environ.get("REFRESH", "0.5"))
-# NOTE: capture service is templated; pass the full unit, e.g. seer-capture@enp1s0.service
-CAPTURE_SERVICE = os.environ.get("CAPTURE_SERVICE", "seer-capture@enp1s0.service")
+# NOTE: capture service is templated; default is derived from YAML 'interface' (overridable via env)
+CAPTURE_SERVICE = os.environ.get("CAPTURE_SERVICE", None) or "seer-capture@enp1s0.service"
 MOVER_SERVICE = os.environ.get("MOVER_SERVICE", "seer-move-oldest.service")
 MOVER_TIMER = os.environ.get("MOVER_TIMER", "seer-move-oldest.timer")
 
@@ -25,11 +26,15 @@ MGR_LOG_HINT = os.environ.get("MGR_LOG", "/var/log/seer/mover.log")
 JSON_SPOOL = os.environ.get("JSON_SPOOL", "/var/seer/json_spool")
 SHIPPER_SERVICE = os.environ.get("SHIPPER_SERVICE", "seer-shipper.service")
 AGENT_SERVICE = os.environ.get("AGENT_SERVICE", "seer-agent.service")
+HOTSWAP_SERVICE = os.environ.get("HOTSWAP_SERVICE", "seer-hotswap.service")
+HOTSWAP_STATE = os.environ.get("HOTSWAP_STATE", "/var/log/seer/hotswap_state.json")
 
 # CLI / env flags
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--no-colors", dest="no_colors", action="store_true",
                     help="Disable colors in the TUI")
+parser.add_argument("--once", dest="once", action="store_true",
+                    help="Print a one-shot textual status and exit")
 _args, _unknown = parser.parse_known_args()
 NO_COLORS = bool(_args.no_colors) or os.environ.get("NO_COLORS", "0") in ("1", "true", "True")
 
@@ -48,6 +53,16 @@ def read_cfg():
         return cfg
     except Exception:
         return {}
+
+
+# Load config early so we can honor json_spool path from YAML
+_CFG_BOOT = read_cfg()
+if isinstance(_CFG_BOOT, dict):
+    JSON_SPOOL = _CFG_BOOT.get("json_spool", JSON_SPOOL) or JSON_SPOOL
+    _IFACE_BOOT = _CFG_BOOT.get("interface", "enp2s0")
+    # If CAPTURE_SERVICE not explicitly set via env, derive from YAML
+    if os.environ.get("CAPTURE_SERVICE") in (None, ""):
+        CAPTURE_SERVICE = f"seer-capture@{_IFACE_BOOT}.service"
 
 
 def systemctl_is_active(unit):
@@ -78,17 +93,42 @@ def count_pcaps(path):
         return 0
 
 
-def count_jsons(path):
+def read_hotswap_state():
+    """Read hotswap state file for export drive status."""
     try:
-        # Zeek may write .log (JSON content) or .log.json depending on pipeline
-        patterns = ["*.json*", "*.log", "*.log.json*"]
-        s = set()
-        for pat in patterns:
-            for p in glob.glob(os.path.join(path, pat)):
-                s.add(p)
-        return len(s)
+        with open(HOTSWAP_STATE) as f:
+            return json.load(f)
     except Exception:
-        return 0
+        return {}
+
+
+def json_stats(path):
+    """Return (file_count, total_bytes, last_mtime_epoch) for JSON/log files.
+    - Searches recursively to handle both flat and dated subdirs.
+    - Matches Zeek's common patterns: *.log (JSON content) and *.json*.
+    """
+    try:
+        patterns = ["**/*.json*", "**/*.log", "**/*.log.json*"]
+        seen = set()
+        total = 0
+        last_m = 0.0
+        for pat in patterns:
+            for p in glob.glob(os.path.join(path, pat), recursive=True):
+                if os.path.isdir(p):
+                    continue
+                if p in seen:
+                    continue
+                seen.add(p)
+                try:
+                    st = os.stat(p)
+                    total += st.st_size
+                    if st.st_mtime > last_m:
+                        last_m = st.st_mtime
+                except FileNotFoundError:
+                    pass
+        return (len(seen), total, last_m)
+    except Exception:
+        return (0, 0, 0.0)
 
 
 def human_bytes(n):
@@ -103,18 +143,63 @@ def human_bytes(n):
     return f"{v:.1f} {u[i]}"
 
 
+def human_ago(epoch_ts):
+    if not epoch_ts:
+        return "n/a"
+    dt = max(0, time.time() - float(epoch_ts))
+    if dt < 1:
+        return "<1s"
+    if dt < 60:
+        return f"{int(dt)}s"
+    m, s = divmod(int(dt), 60)
+    if m < 60:
+        return f"{m}m {s}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m"
+
+
+def safe_addstr(stdscr, y, x, text, attr=0):
+    """Safely add string to screen, ignoring errors if out of bounds."""
+    try:
+        h, w = stdscr.getmaxyx()
+        if y < h - 1 and x < w - 1:
+            # Truncate text to fit in window
+            max_len = w - x - 1
+            if len(text) > max_len:
+                text = text[:max_len]
+            if attr:
+                stdscr.addstr(y, x, text, attr)
+            else:
+                stdscr.addstr(y, x, text)
+    except curses.error:
+        pass  # Ignore curses errors
+
+
 def draw_text(stdscr, y, x, w, text):
-    stdscr.addstr(y, x, (text[:w]).ljust(w))
+    try:
+        h, width = stdscr.getmaxyx()
+        if y < h and x < width:
+            safe_text = (text[:w]).ljust(w)[:width-x-1]
+            stdscr.addstr(y, x, safe_text)
+    except curses.error:
+        pass  # Ignore curses errors from writing outside bounds
 
 
 def divider(stdscr, y, width, ch="-"):
-    stdscr.addstr(y, 0, (ch * width)[:width])
+    try:
+        h, w = stdscr.getmaxyx()
+        if y < h:
+            stdscr.addstr(y, 0, (ch * width)[:min(width, w-1)])
+    except curses.error:
+        pass
 
 
 def act_stop():
     units = [CAPTURE_SERVICE, MOVER_SERVICE]
     if MOVER_TIMER:
         units.append(MOVER_TIMER)
+    if HOTSWAP_SERVICE:
+        units.append(HOTSWAP_SERVICE)
     run(["systemctl", "stop", *units])
 
 
@@ -135,18 +220,287 @@ def act_clear(buff_dir):
 
 def act_start():
     run(["systemctl", "daemon-reload"])
-    for u in (CAPTURE_SERVICE, MOVER_SERVICE):
-        if not u:
-            continue
-        r = run(["systemctl", "restart", u])
+    # Restart capture service
+    if CAPTURE_SERVICE:
+        r = run(["systemctl", "restart", CAPTURE_SERVICE])
         if r.returncode != 0:
-            run(["systemctl", "start", u])
+            run(["systemctl", "start", CAPTURE_SERVICE])
+    
+    # Restart timer (not the service - timer manages service activation)
+    if MOVER_TIMER:
+        r = run(["systemctl", "restart", MOVER_TIMER])
+        if r.returncode != 0:
+            run(["systemctl", "start", MOVER_TIMER])
+    
+    # Restart hotswap service
+    if HOTSWAP_SERVICE:
+        r = run(["systemctl", "restart", HOTSWAP_SERVICE])
+        if r.returncode != 0:
+            run(["systemctl", "start", HOTSWAP_SERVICE])
+
+
+def act_toggle_mount():
+    """Toggle mount/unmount of export drive. Fully automated - finds and mounts entire drive."""
+    cfg = read_cfg()
+    mount_candidates = cfg.get('export', {}).get('mount_candidates', ['/mnt/seer_external'])
+    target = mount_candidates[0] if mount_candidates else "/mnt/seer_external"
+    
+    # Check if target is currently mounted
+    if os.path.ismount(target):
+        # Unmount - sync first to ensure data is written
+        run(["sync"])
+        result = run(["sudo", "umount", target])
+        if result.returncode == 0:
+            return f"✓ Unmounted {target}"
+        else:
+            # If busy, try lazy unmount
+            if "busy" in result.stderr.lower():
+                lazy_result = run(["sudo", "umount", "-l", target])
+                if lazy_result.returncode == 0:
+                    return f"✓ Unmounted {target} (lazy - will complete when files close)"
+            return f"✗ Failed to unmount {target}: {result.stderr.strip()}"
+    
+    # Not mounted - try to mount
+    # Strategy: Find external drives by checking:
+    # 1. /dev/sd[b-z] (non-system disks)
+    # 2. Removable flag (RM=1)
+    # 3. USB connection (check /sys path)
+    # 4. Has filesystem
+    
+    result = run(["lsblk", "-nrbo", "NAME,SIZE,TYPE,RM,MOUNTPOINT,FSTYPE"])
+    
+    candidates = []
+    
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        
+        dev_name = parts[0]
+        size = int(parts[1]) if parts[1].isdigit() else 0
+        dev_type = parts[2]
+        removable = parts[3]
+        
+        # Parse optional mountpoint and fstype
+        # When no mountpoint, fstype shifts left
+        mountpoint = ""
+        fstype = ""
+        if len(parts) >= 5:
+            # Could be mountpoint or fstype
+            if parts[4] in ('ext4', 'ext3', 'ext2', 'xfs', 'btrfs', 'ntfs', 'vfat', 'exfat', 'fat32'):
+                fstype = parts[4]
+            else:
+                mountpoint = parts[4]
+                fstype = parts[5] if len(parts) > 5 else ""
+        
+        # Skip if already mounted
+        if mountpoint:
+            continue
+        
+        # Skip system disk (sda)
+        if dev_name.startswith('sda'):
+            continue
+        
+        # Only consider disks (not partitions, loop, etc)
+        if dev_type != 'disk':
+            continue
+        
+        # Strategy: Accept any non-sda disk with a filesystem
+        # This includes USB-SATA cradles, external drives, etc.
+        
+        # Prioritize: sdb* > removable > has filesystem > large
+        priority = 0
+        
+        # Highest priority: /dev/sdb (most common external drive)
+        if dev_name.startswith('sdb'):
+            priority = 10
+        # Medium priority: marked as removable
+        elif removable == '1':
+            priority = 5
+        # Low priority: has filesystem and large enough
+        elif fstype and size > 1000000000:  # >1GB with filesystem
+            priority = 3
+        # Fallback: any disk over 1GB (even without filesystem shown)
+        elif size > 1000000000:
+            priority = 1
+        
+        if priority > 0:
+            candidates.append((priority, size, dev_name, dev_type))
+    
+    if not candidates:
+        # Debug: show what we found
+        debug_info = run(["lsblk", "-o", "NAME,SIZE,TYPE,RM,FSTYPE,MOUNTPOINT"])
+        return f"✗ No suitable drive found\n\nAvailable devices:\n{debug_info.stdout}"
+    
+    # Sort by priority (highest first), then size (largest first)
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    best_device = candidates[0][2]
+    device_path = f"/dev/{best_device}"
+    
+    # Ensure mount point exists
+    os.makedirs(target, exist_ok=True)
+    
+    # Try to mount - first check if device exists
+    if not os.path.exists(device_path):
+        return f"✗ Device {device_path} not found"
+    
+    # Check if device has a filesystem
+    blkid_result = run(["sudo", "blkid", device_path])
+    if blkid_result.returncode != 0:
+        return f"✗ No filesystem detected on {device_path}. Use: sudo mkfs.ext4 {device_path}"
+    
+    # Try to mount
+    mount_result = run(["sudo", "mount", device_path, target])
+    
+    if mount_result.returncode == 0:
+        # Fix permissions so seer user can write
+        run(["sudo", "chown", "seer:seer", target])
+        run(["sudo", "chmod", "755", target])
+        
+        # Get size info
+        df_result = run(["df", "-h", target])
+        size_info = ""
+        if df_result.returncode == 0:
+            lines = df_result.stdout.strip().split('\n')
+            if len(lines) > 1:
+                fields = lines[1].split()
+                if len(fields) >= 2:
+                    size_info = f" ({fields[1]} total)"
+        
+        return f"✓ Mounted {device_path} at {target}{size_info}"
+    else:
+        error_msg = mount_result.stderr.strip()
+        # Provide helpful hints based on error
+        if "already mounted" in error_msg.lower():
+            return f"✗ {device_path} is already mounted elsewhere"
+        elif "special device" in error_msg.lower():
+            return f"✗ Device {device_path} not found or not accessible"
+        elif "wrong fs type" in error_msg.lower():
+            return f"✗ Filesystem type not recognized. Try: sudo blkid {device_path}"
+        else:
+            return f"✗ Mount failed: {error_msg if error_msg else 'unknown error'}"
+
+
+def collect_status():
+    """Gather a snapshot of service/file metrics for one-shot output."""
+    cap_state = systemctl_is_active(CAPTURE_SERVICE)
+    mov_state = systemctl_is_active(MOVER_SERVICE)
+    tim_state = systemctl_is_active(MOVER_TIMER) if MOVER_TIMER else "n/a"
+    hot_state = systemctl_is_active(HOTSWAP_SERVICE)
+    
+    # Prefer interface from YAML; fall back to env IFACE or enp2s0
+    iface = None
+    try:
+        iface = _IFACE_BOOT  # set at import from read_cfg()
+    except NameError:
+        iface = None
+    if not iface:
+        iface = os.environ.get('IFACE', 'enp2s0')
+    zeek_unit = f"seer-zeek@{iface}.service"
+    zeek_state = systemctl_is_active(zeek_unit)
+
+    cfg = read_cfg()
+    ring_dir = cfg.get("ring_dir", "/var/seer/pcap_ring")
+    dest_dir = cfg.get("dest_dir", "/opt/seer/var/queue")
+    backlog_dir = cfg.get("backlog_dir", "/opt/seer/var/backlog")
+
+    buff_count = count_pcaps(ring_dir)
+    dest_count = count_pcaps(dest_dir)
+    back_count = count_pcaps(backlog_dir)
+    j_count, j_bytes, j_last = json_stats(JSON_SPOOL)
+    
+    # Read hotswap export state
+    hs_state = read_hotswap_state()
+    drive_present = hs_state.get('drive_present', False)
+    last_export = hs_state.get('last_export_ts', None)
+    total_exported = hs_state.get('total_exported', 0)
+
+    return {
+        "cap_state": cap_state,
+        "mov_state": mov_state,
+        "tim_state": tim_state,
+        "zeek_state": zeek_state,
+        "hot_state": hot_state,
+        "ring_dir": ring_dir,
+        "dest_dir": dest_dir,
+        "backlog_dir": backlog_dir,
+        "buff_count": buff_count,
+        "dest_count": dest_count,
+        "back_count": back_count,
+        "json": {"count": j_count, "bytes": j_bytes, "last": j_last},
+        "export": {
+            "drive_present": drive_present,
+            "last_export_ts": last_export,
+            "total_exported": total_exported
+        },
+    }
+
+
+def show_help(stdscr):
+    """Display full help screen with all controls."""
+    curses.curs_set(0)
+    stdscr.clear()
+    h, w = stdscr.getmaxyx()
+    
+    help_lines = [
+        "SEER CONSOLE - CONTROLS",
+        "",
+        "SYSTEM:",
+        "  [1] Stop All Services",
+        "  [3] Start/Restart Services",
+        "  [z] Start Zeek",
+        "  [x] Stop Zeek",
+        "",
+        "EXPORT:",
+        "  [2] Toggle Mount/Unmount Drive",
+        "",
+        "LOGS:",
+        "  [c] Capture Logs",
+        "  [m] Mover Logs",
+        "  [h] Hotswap Logs",
+        "  [s] Service Status",
+        "",
+        "DISPLAY:",
+        "  [+] Refresh Faster",
+        "  [-] Refresh Slower",
+        "",
+        "OTHER:",
+        "  [?] Show This Help",
+        "  [q] Quit",
+        "",
+        "Press any key to return..."
+    ]
+    
+    for i, line in enumerate(help_lines):
+        if i < h - 1:
+            stdscr.addstr(i, 2, line[:w-4])
+    
+    stdscr.refresh()
+    stdscr.nodelay(False)
+    stdscr.getch()
+    stdscr.nodelay(True)
 
 
 def render(stdscr):
     global REFRESH
     curses.curs_set(0)
     stdscr.nodelay(True)
+    
+    # Check terminal size - use compact mode for small screens
+    h, w = stdscr.getmaxyx()
+    compact_mode = (h < 20 or w < 60)
+    
+    if h < 12 or w < 40:
+        # Too small even for compact mode
+        stdscr.clear()
+        stdscr.addstr(0, 0, "Terminal too small!")
+        stdscr.addstr(1, 0, f"Current: {h}x{w}")
+        stdscr.addstr(2, 0, "Minimum: 12x40")
+        stdscr.addstr(3, 0, "Resize and restart")
+        stdscr.refresh()
+        stdscr.getch()
+        return
+    
     if curses.has_colors() and not NO_COLORS:
         curses.start_color()
         try:
@@ -170,6 +524,11 @@ def render(stdscr):
                 pass
 
     last_key = ""
+    status_message = ""  # For displaying action results
+    status_message_time = 0  # Timestamp when message was set
+    # rolling stats for JSON write rate estimation
+    last_json_bytes = None
+    last_json_ts = None
 
     def handle_winch(signum, frame):
         curses.resizeterm(*stdscr.getmaxyx())
@@ -177,20 +536,19 @@ def render(stdscr):
     signal.signal(signal.SIGWINCH, handle_winch)
     while True:
         h, w = stdscr.getmaxyx()
-        compact = (w <= 64)
         stdscr.erase()
 
         host = os.uname().nodename
         now = datetime.now()
-        hdr = f"SEER MONITOR  [REF: {REFRESH:.1f}s]  [HOST: {host}]  [TIME: {now.strftime('%H:%M:%S  %b %d %Y')}]"
-        draw_text(stdscr, 0, 0, w, hdr)
-        divider(stdscr, 1, w)
-
+        
+        # Gather data
         cap_state = systemctl_is_active(CAPTURE_SERVICE)
         mov_state = systemctl_is_active(MOVER_SERVICE)
         tim_state = systemctl_is_active(MOVER_TIMER) if MOVER_TIMER else "n/a"
+        hot_state = systemctl_is_active(HOTSWAP_SERVICE)
 
-        zeek_unit = f"seer-zeek@{os.environ.get('IFACE', 'enp1s0')}.service"
+        # Prefer interface from YAML; fall back to env IFACE or enp2s0
+        zeek_unit = f"seer-zeek@{_IFACE_BOOT if '_IFACE_BOOT' in globals() else os.environ.get('IFACE', 'enp2s0')}.service"
         zeek_state = systemctl_is_active(zeek_unit)
 
         buff_count = count_pcaps(BUFF_DIR)
@@ -200,7 +558,107 @@ def render(stdscr):
         backlog_dir = cfg.get("backlog_dir", "/opt/seer/var/backlog")
         dest_count = count_pcaps(dest_dir)
         back_count = count_pcaps(backlog_dir)
-        json_count = count_jsons(JSON_SPOOL)
+        j_count, j_bytes, j_last = json_stats(JSON_SPOOL)
+        
+        # Read hotswap export state
+        hs_state = read_hotswap_state()
+        drive_present = hs_state.get('drive_present', False)
+        last_export = hs_state.get('last_export_ts', 'never')
+        total_exported = hs_state.get('total_exported', 0)
+        
+        # Count actual files on drive if mounted
+        drive_pcap_count = 0
+        if drive_present:
+            mount_candidates = cfg.get('export', {}).get('mount_candidates', ['/mnt/seer_external'])
+            for candidate in mount_candidates:
+                if os.path.ismount(candidate):
+                    try:
+                        drive_pcap_count = sum(1 for _ in Path(candidate).rglob('*.pcap*'))
+                    except:
+                        pass
+                    break
+        
+        # Check if we should use compact mode (small screen)
+        if compact_mode or h < 20 or w < 60:
+            # COMPACT MODE - Show only PCAP info
+            hdr = f"SEER [{now.strftime('%H:%M:%S')}]"
+            draw_text(stdscr, 0, 0, w, hdr)
+            divider(stdscr, 1, w)
+            
+            safe_addstr(stdscr, 2, 0, "PCAP:")
+            safe_addstr(stdscr, 3, 2, f"Ring    : {buff_count}")
+            safe_addstr(stdscr, 4, 2, f"Backlog : {back_count}")
+            
+            # Drive status
+            if drive_present:
+                mount_candidates = cfg.get('export', {}).get('mount_candidates', ['/mnt/seer_external'])
+                active_mount = "drive"
+                for candidate in mount_candidates:
+                    if os.path.ismount(candidate):
+                        active_mount = candidate
+                        break
+                safe_addstr(stdscr, 5, 2, f"Drive   : ", curses.color_pair(2) if curses.has_colors() else 0)
+                safe_addstr(stdscr, 5, 12, "CONNECTED")
+                safe_addstr(stdscr, 6, 2, f"Mount   : {active_mount[:w-12]}")
+                safe_addstr(stdscr, 7, 2, f"On Drive: {drive_pcap_count} files")
+            else:
+                safe_addstr(stdscr, 5, 2, f"Drive   : ", curses.color_pair(3) if curses.has_colors() else 0)
+                safe_addstr(stdscr, 5, 12, "not connected")
+            
+            divider(stdscr, 8, w)
+            safe_addstr(stdscr, 9, 0, "[2] Mount/Unmount  [q] Quit")
+            
+            # Show status message if recent (within 5 seconds)
+            if status_message and (time.time() - status_message_time < 5):
+                safe_addstr(stdscr, 10, 0, f"Status: {status_message[:w-8]}")
+            else:
+                safe_addstr(stdscr, 10, 0, f"Input: {last_key}")
+            
+            stdscr.refresh()
+            
+            # Handle input (simplified for compact mode)
+            t_end = time.time() + REFRESH
+            while time.time() < t_end:
+                try:
+                    ch = stdscr.getch()
+                except curses.error:
+                    ch = -1
+                if ch == -1:
+                    time.sleep(0.02)
+                    continue
+                if ch in (ord('q'), ord('Q')):
+                    return
+                last_key = chr(ch) if 32 <= ch < 127 else f"[{ch}]"
+                
+                if ch == ord('2'):
+                    # Mount/Unmount drive toggle - stay in console
+                    status_message = "Processing..."
+                    stdscr.refresh()
+                    msg = act_toggle_mount()
+                    status_message = msg
+                    status_message_time = time.time()
+                break
+            continue  # Skip full mode rendering
+        
+        # FULL MODE - Show everything
+        hdr = f"SEER MONITOR  [REF: {REFRESH:.1f}s]  [HOST: {host}]  [TIME: {now.strftime('%H:%M:%S  %b %d %Y')}]"
+        draw_text(stdscr, 0, 0, w, hdr)
+        divider(stdscr, 1, w)
+
+        # compute a simple write rate (bytes/sec) over the last refresh
+        rate_txt = "n/a"
+        now_ts = time.time()
+        if last_json_bytes is not None and last_json_ts is not None:
+            dt = max(0.001, now_ts - last_json_ts)
+            dbytes = max(0, j_bytes - last_json_bytes)
+            bps = dbytes / dt
+            # show per-minute if rate is low, else per-second
+            if bps < 1024:
+                rate_txt = f"{human_bytes(bps*60)}/min"
+            else:
+                rate_txt = f"{human_bytes(bps)}/s"
+        last_json_bytes = j_bytes
+        last_json_ts = now_ts
 
         left_w = w // 2 - 1
         right_w = w - left_w - 3
@@ -218,24 +676,47 @@ def render(stdscr):
         stdscr.addstr(4, 14, s, curses.color_pair(c))
         stdscr.addstr(5, 2, f"  TIMER   : {tim_state}")
         stdscr.addstr(6, 2, f"  ZEEK    : {zeek_state}")
+        s, c = badge_text(hot_state)
+        stdscr.addstr(7, 2, "  HOTSWAP : ")
+        stdscr.addstr(7, 14, s, curses.color_pair(c))
 
-        stdscr.addstr(7, 0, "PCAP:")
-        stdscr.addstr(8, 2, f"  Buffer count: {buff_count:<5}")
-        stdscr.addstr(9, 2, f"  Dest count  : {dest_count:<5}")
-        stdscr.addstr(10, 2, f"  Backlog cnt : {back_count:<5}")
-        stdscr.addstr(11, 2, f"  JSON count  : {json_count:<5}")
+        stdscr.addstr(8, 0, "PCAP:")
+        stdscr.addstr(9, 2, f"  Ring        : {buff_count:<5}")
+        stdscr.addstr(10, 2, f"  Backlog     : {back_count:<5}")
+        
+        # Show drive status and destination
+        if drive_present:
+            # Detect which mount is active
+            mount_candidates = cfg.get('export', {}).get('mount_candidates', ['/mnt/seer_external'])
+            active_mount = "drive"
+            for candidate in mount_candidates:
+                if os.path.ismount(candidate):
+                    active_mount = candidate
+                    break
+            stdscr.addstr(11, 2, f"  Drive       : ", curses.color_pair(2))
+            stdscr.addstr(11, 17, f"CONNECTED")
+            stdscr.addstr(12, 2, f"  Mount       : {active_mount}")
+            stdscr.addstr(13, 2, f"  On Drive    : {drive_pcap_count} files")
+        else:
+            stdscr.addstr(11, 2, f"  Drive       : ", curses.color_pair(3))
+            stdscr.addstr(11, 17, f"not connected")
+        
+        stdscr.addstr(14, 0, "JSON:")
+        stdscr.addstr(15, 2, f"  Captured    : {human_bytes(j_bytes):<12}")
 
-        stdscr.addstr(3, left_w + 2, "[1] Stop All")
-        stdscr.addstr(4, left_w + 2, "[2] Clear PCAPs")
-        stdscr.addstr(5, left_w + 2, "[3] Start/Restart")
-        stdscr.addstr(8, left_w + 2, "[+] Faster  [-] Slower")
-        stdscr.addstr(9, left_w + 2, "[c] Capture Logs")
-        stdscr.addstr(10, left_w + 2, "[m] Mover Logs")
-        stdscr.addstr(11, left_w + 2, "[s] Service Status  [q] Quit")
-        stdscr.addstr(12, left_w + 2, "[z] Start Zeek  [x] Stop Zeek")
+        stdscr.addstr(3, left_w + 2, "[1] Stop   [3] Start")
+        stdscr.addstr(4, left_w + 2, "[2] Mount/Unmount Drive")
+        stdscr.addstr(5, left_w + 2, "[z] Zeek Start  [x] Stop")
+        stdscr.addstr(7, left_w + 2, "[c] Cap [m] Mov [h] Hot")
+        stdscr.addstr(8, left_w + 2, "[s] Status  [+/-] Speed")
+        stdscr.addstr(10, left_w + 2, "[?] Help    [q] Quit")
 
-        divider(stdscr, 13, w)
-        draw_text(stdscr, 14, 0, w, f"Input: {last_key}")
+        divider(stdscr, 19, w)
+        # Show status message if recent (within 5 seconds); otherwise show last input
+        if status_message and (time.time() - status_message_time < 5):
+            draw_text(stdscr, 20, 0, w, f"Status: {status_message}")
+        else:
+            draw_text(stdscr, 20, 0, w, f"Input: {last_key}")
         stdscr.refresh()
 
         t_end = time.time() + REFRESH
@@ -254,9 +735,16 @@ def render(stdscr):
             if ch == ord('1'):
                 act_stop()
             elif ch == ord('2'):
-                act_clear(BUFF_DIR)
+                # Mount/Unmount drive toggle (non-blocking; stay in console)
+                status_message = "Processing..."
+                stdscr.refresh()
+                msg = act_toggle_mount()
+                status_message = msg
+                status_message_time = time.time()
             elif ch == ord('3'):
                 act_start()
+            elif ch == ord('?'):
+                show_help(stdscr)
             elif ch == ord('+'):
                 REFRESH = round(REFRESH + 0.5, 1)
             elif ch == ord('-'):
@@ -268,6 +756,10 @@ def render(stdscr):
             elif ch in (ord('m'), ord('M')):
                 curses.def_prog_mode(); curses.endwin()
                 os.system(f"journalctl -u {shlex.quote(MOVER_SERVICE)} -n 400 --no-pager | less -SRX")
+                curses.reset_prog_mode()
+            elif ch in (ord('h'), ord('H')):
+                curses.def_prog_mode(); curses.endwin()
+                os.system(f"journalctl -u {shlex.quote(HOTSWAP_SERVICE)} -n 400 --no-pager | less -SRX")
                 curses.reset_prog_mode()
             elif ch in (ord('s'), ord('S')):
                 curses.def_prog_mode(); curses.endwin()
@@ -304,7 +796,41 @@ def render(stdscr):
 
 
 def main():
-    # If not running in an interactive terminal, bail out gracefully.
+    # One-shot textual status mode
+    if getattr(_args, "once", False):
+        s = collect_status()
+        host = os.uname().nodename
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"SEER STATUS  host={host}  time={now}")
+        print(f"  CAPTURE : {s['cap_state']}    MOVER: {s['mov_state']}   TIMER: {s['tim_state']}   ZEEK: {s['zeek_state']}   HOTSWAP: {s['hot_state']}")
+        print(f"  RING    : {s['ring_dir']}  count={s['buff_count']}")
+        print(f"  BACKLOG : {s['backlog_dir']}  count={s['back_count']}")
+        
+        # Show drive status
+        exp = s["export"]
+        if exp['drive_present']:
+            cfg = read_cfg()
+            mount_candidates = cfg.get('export', {}).get('mount_candidates', ['/mnt/seer_external'])
+            active_mount = "drive"
+            for candidate in mount_candidates:
+                if os.path.ismount(candidate):
+                    active_mount = candidate
+                    break
+            print(f"  DRIVE   : CONNECTED at {active_mount}")
+            # Count files on drive
+            try:
+                drive_count = sum(1 for _ in Path(active_mount).rglob('*.pcap*'))
+                print(f"  ON DRIVE: {drive_count} files")
+            except:
+                print(f"  ON DRIVE: (unable to count)")
+        else:
+            print(f"  DRIVE   : not connected")
+        
+        j = s["json"]
+        print(f"  JSON captured: {human_bytes(j['bytes'])}")
+        return
+
+    # Interactive TUI requires a TTY.
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("seer-console: not running in a TTY; interactive console requires a terminal.")
         return

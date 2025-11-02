@@ -74,6 +74,16 @@ if [[ -f "$REPO_ROOT/Automation/systemd/seer-zeek@.service" ]]; then
   sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-zeek@.service" /etc/systemd/system/seer-zeek@.service
 fi
 
+# Install hotswap script and service
+if [[ -f "$REPO_ROOT/Automation/SEER/seer_hotswap.py" ]]; then
+  echo "Installing seer_hotswap.py to /usr/local/bin/seer_hotswap.py"
+  sudo install -m 0755 "$REPO_ROOT/Automation/SEER/seer_hotswap.py" /usr/local/bin/seer_hotswap.py
+fi
+if [[ -f "$REPO_ROOT/Automation/systemd/seer-hotswap.service" ]]; then
+  echo "Installing seer-hotswap.service"
+  sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-hotswap.service" /etc/systemd/system/seer-hotswap.service
+fi
+
 if [[ -f "$REPO_ROOT/Automation/systemd/seer-move-oldest.service" ]]; then
   echo "Installing seer-move-oldest.service"
   sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-move-oldest.service" /etc/systemd/system/seer-move-oldest.service
@@ -87,17 +97,17 @@ echo "Reloading systemd daemon and enabling services"
 sudo systemctl daemon-reload
 
 # Enable and start capture for detected interface (use what was written to /opt/seer/etc/seer.yml if present)
-INTERFACE="enp1s0"
+INTERFACE="enp2s0"
 if [[ -f /opt/seer/etc/seer.yml ]]; then
   INTERFACE=$(python3 - <<'PY'
 import yaml
 try:
-    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml'))
-    print(cfg.get('interface','enp1s0'))
+    cfg = yaml.safe_load(open('/opt/seer/etc/seer.yml'))
+    print(cfg.get('interface', 'enp2s0'))
 except Exception:
-    print('enp1s0')
+    print('enp2s0')
 PY
-)
+  )
 fi
 
 echo "Enabling and starting seer-capture@${INTERFACE}.service"
@@ -121,6 +131,11 @@ fi
 if systemctl list-unit-files | grep -q seer-move-oldest.timer; then
   echo "Enabling and starting seer-move-oldest.timer"
   sudo systemctl enable --now seer-move-oldest.timer || true
+fi
+
+if systemctl list-unit-files | grep -q seer-hotswap.service; then
+  echo "Enabling and starting seer-hotswap.service"
+  sudo systemctl enable --now seer-hotswap.service || true
 fi
 
 echo "Verification: listing units and recent journal entries"

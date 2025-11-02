@@ -1,0 +1,33 @@
+[Unit]
+Description=SEER Hot-Swap / Export Service (PCAP offload to external drive)
+Documentation=https://github.com/EVR-RDY-Projects/SEER-Sensor
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/seer_hotswap.py
+Restart=always
+RestartSec=5
+User=seer
+Group=seer
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=seer-hotswap
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/seer/var /var/seer /var/log/seer /var/run /mnt /media
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
