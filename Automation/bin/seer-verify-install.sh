@@ -144,6 +144,35 @@ else
   logs_ok=1
 fi
 
+# Cleanup: remove any verifier-created dummy pcaps from ring, dest, backlog, and export drive if mounted
+# We identify dummies by the filename prefix 'SEER-DUMMY-'
+cleanup_dummy() {
+  echo "Cleanup: removing SEER-DUMMY test files"
+  rm -f ${ring_dir}/SEER-DUMMY-*.pcap* 2>/dev/null || true
+  rm -f ${dest_dir}/SEER-DUMMY-*.pcap* 2>/dev/null || true
+  rm -f ${backlog_dir}/SEER-DUMMY-*.pcap* 2>/dev/null || true
+  # Attempt to remove from export drive pcap tree if mounted
+  mounts=$(python3 - <<'PY'
+import yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    mc=(cfg.get('export',{}) or {}).get('mount_candidates', ['/mnt/seer_external'])
+    print("\n".join(mc))
+except Exception:
+    print('/mnt/seer_external')
+PY
+  )
+  while IFS= read -r m; do
+    [[ -z "$m" ]] && continue
+    if mountpoint -q -- "$m"; then
+      # Only delete dummy files, keep real captures intact
+      find "$m/pcap" -type f -name 'SEER-DUMMY-*.pcap*' -delete 2>/dev/null || true
+    fi
+  done <<< "$mounts"
+}
+
+cleanup_dummy
+
 if [[ ${moved} -eq 1 && ${capture_ok} -eq 1 && ${zeek_ok} -eq 1 && ${logs_ok} -eq 1 ]]; then
   echo "Verification PASSED"
   exit 0
