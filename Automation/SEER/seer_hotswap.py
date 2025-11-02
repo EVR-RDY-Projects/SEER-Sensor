@@ -17,6 +17,9 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+# Ensure log/state directories exist early (before configuring logging)
+os.makedirs('/var/log/seer', exist_ok=True)
+
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +47,7 @@ def read_config():
 
 def acquire_lock():
     """Ensure single instance via PID lock file."""
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
     if os.path.exists(LOCK_FILE):
         try:
             with open(LOCK_FILE) as f:
@@ -238,6 +242,7 @@ def update_state(drive_present, last_export_ts, total_exported):
         'updated': datetime.now().isoformat()
     }
     try:
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
         with open(STATE_FILE, 'w') as f:
             json.dump(state, f, indent=2)
     except Exception as e:

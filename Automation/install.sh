@@ -92,6 +92,10 @@ if [[ -f "$REPO_ROOT/Automation/systemd/seer-hotswap.service" ]]; then
   sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-hotswap.service" /etc/systemd/system/seer-hotswap.service
 fi
 
+# Ensure log/state directory exists with correct ownership
+sudo mkdir -p /var/log/seer
+sudo chown seer:seer /var/log/seer || true
+
 if [[ -f "$REPO_ROOT/Automation/systemd/seer-move-oldest.service" ]]; then
   echo "Installing seer-move-oldest.service"
   sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-move-oldest.service" /etc/systemd/system/seer-move-oldest.service
