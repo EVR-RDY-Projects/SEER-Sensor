@@ -105,13 +105,17 @@ rm -f /etc/systemd/system/seer-capture@.service \
       /etc/systemd/system/seer-zeek@.service \
       /etc/systemd/system/seer-hotswap.service
 sc daemon-reload
-ok "systemd units removed and daemon reloaded"say "3) Remove installed binaries"
+ok "systemd units removed and daemon reloaded"
+
+say "3) Remove installed binaries"
 rm -f /usr/local/bin/seer-capture.sh \
   /usr/local/bin/seer_console.py \
   /usr/local/bin/seer-console \
   /usr/local/bin/seer-zeek.sh \
   /usr/local/bin/seer-move-oldest.py \
   /usr/local/bin/seer_hotswap.py \
+  /usr/local/bin/seer \
+  /usr/local/bin/seer-toggle-drive \
   /usr/local/bin/seer-verify-install.sh
 # Remove legacy stray copy if it exists (some systems may have installed to /usr/bin)
 [[ -f /usr/bin/seer-capture.sh ]] && rm -f /usr/bin/seer-capture.sh || true

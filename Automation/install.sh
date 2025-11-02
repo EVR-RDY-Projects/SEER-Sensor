@@ -60,6 +60,14 @@ fi
 if [[ -f "$REPO_ROOT/Automation/bin/seer_console.py" ]]; then
   echo "Installing seer-console to /usr/local/bin/seer-console"
   sudo install -m 0755 "$REPO_ROOT/Automation/bin/seer_console.py" /usr/local/bin/seer-console
+  # Provide a simple wrapper so typing 'seer' launches the console
+  echo "Installing wrapper /usr/local/bin/seer"
+  sudo tee /usr/local/bin/seer >/dev/null <<'EOS'
+#!/bin/bash
+# Wrapper to run seer-console (with sudo to manage systemd and mounts)
+exec sudo /usr/local/bin/seer-console "$@"
+EOS
+  sudo chmod 0755 /usr/local/bin/seer
 fi
 
 # Install Zeek wrapper
