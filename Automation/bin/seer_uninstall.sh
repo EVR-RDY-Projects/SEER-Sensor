@@ -74,6 +74,7 @@ echo "  - Remove binaries: /usr/local/bin/seer-capture.sh, /usr/local/bin/seer_c
 if [[ $PURGE -eq 1 ]]; then
   echo "  - PURGE config   : /opt/seer (incl. /opt/seer/etc/seer.yml backups)"
   echo "  - PURGE data     : /var/seer and /var/lib/tcpdump/pcap_ring (PCAPs WILL BE DELETED)"
+  echo "  - PURGE export   : if an export drive is mounted at configured mount point(s), delete SEER 'pcap/' contents on that drive"
 else
   echo "  - Keep config    : /opt/seer"
   echo "  - Keep data      : /var/seer and /var/lib/tcpdump/pcap_ring"
@@ -124,6 +125,50 @@ ok "binaries removed"
 
 if [[ $PURGE -eq 1 ]]; then
   say "4) PURGE config and data"
+  # Before removing /opt/seer (where seer.yml lives), attempt to purge export drive contents if mounted
+  purge_export_drive() {
+    local cfg='/opt/seer/etc/seer.yml'
+    local mounts=()
+    if [[ -f "$cfg" ]]; then
+      # Extract mount_candidates from YAML (best-effort, python for robustness)
+      mapfile -t mounts < <(python3 - <<'PY'
+import sys, yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    mc=(cfg.get('export',{}) or {}).get('mount_candidates',['/mnt/seer_external'])
+    for m in mc:
+        print(m)
+except Exception:
+    print('/mnt/seer_external')
+PY
+      )
+    else
+      mounts=(/mnt/seer_external)
+    fi
+
+    for m in "${mounts[@]}"; do
+      [[ -z "$m" ]] && continue
+      if mountpoint -q -- "$m"; then
+        say "   - Export drive mounted at $m: purging SEER export files (pcap/)"
+        # Only remove SEER-created content to avoid nuking unrelated user data.
+        # Remove pcap tree and typical manifest/transfer files if present.
+        if [[ -d "$m/pcap" ]]; then
+          rm -rf --one-file-system "$m/pcap" || true
+          ok "removed $m/pcap"
+        fi
+        for f in MANIFEST.txt TRANSFER.LOG; do
+          [[ -f "$m/$f" ]] && rm -f "$m/$f" || true
+        done
+        # Try to remove empty day dirs if any residue remains (best-effort)
+        find "$m" -maxdepth 1 -type d -name 'pcap*' -empty -exec rmdir {} + 2>/dev/null || true
+      else
+        warn "   - $m not mounted; skipping export purge"
+      fi
+    done
+  }
+
+  purge_export_drive
+
   # Be extra cautious: only rm if the paths look right
   [[ -d /opt/seer ]] && rm -rf /opt/seer || true
   # Known SEER data/log locations (remove if present)
