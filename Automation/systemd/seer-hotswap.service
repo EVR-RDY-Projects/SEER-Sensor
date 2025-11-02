@@ -6,6 +6,8 @@ Wants=local-fs.target
 
 [Service]
 Type=simple
+ExecStartPre=/usr/bin/mkdir -p /var/log/seer
+ExecStartPre=/usr/bin/chown seer:seer /var/log/seer
 ExecStart=/usr/bin/python3 /usr/local/bin/seer_hotswap.py
 Restart=always
 RestartSec=5

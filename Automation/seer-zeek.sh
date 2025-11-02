@@ -82,6 +82,9 @@ start_zeek_live() {
   ERRFILE="${LOG_DIR}/zeek.err"
 
   # Read AF_PACKET settings from YAML (zeek_workers, fanout_id)
+  # Allow env override (e.g., from systemd) to avoid AF_PACKET fanout conflicts
+  ZE_WORKERS="${ZEEK_WORKERS:-}"
+  if [ -z "$ZE_WORKERS" ]; then
   ZE_WORKERS=$(python3 - <<'PY'
 import yaml
 try:
@@ -91,6 +94,7 @@ except Exception:
     print(2)
 PY
 )
+  fi
   FANOUT_ID=$(python3 - <<'PY'
 import yaml
 try:
@@ -101,23 +105,37 @@ except Exception:
 PY
 )
 
+  # If only one worker, disable fanout to maximize compatibility with other sniffers (e.g., tcpdump)
+  if [ "${ZE_WORKERS}" -le 1 ] 2>/dev/null; then
+    FANOUT_ID=0
+  fi
+
   # Build AF_PACKET redefs
   AF_REDEFS="redef AF_Packet::fanout_id=${FANOUT_ID}; redef AF_Packet::interfaces += { [\$name=\"${IFACE}\", \$threads=${ZE_WORKERS}] };"
 
-  echo "Starting Zeek on ${IFACE} (AF_PACKET workers=${ZE_WORKERS} fanout=${FANOUT_ID}); logs -> ${RUN_DIR}"
+  IFACE_MODE="${ZEEK_IFACE_MODE:-af_packet}"
+  if [ "$IFACE_MODE" = "pcap" ]; then
+    CAP_INTF="$IFACE"
+    MODE_DESC="PCAP"
+  else
+    CAP_INTF="af_packet::$IFACE"
+    MODE_DESC="AF_PACKET"
+  fi
+
+  echo "Starting Zeek on ${IFACE} (${MODE_DESC} workers=${ZE_WORKERS} fanout=${FANOUT_ID}); logs -> ${RUN_DIR}"
   echo "[DEBUG] ENV: IFACE=$IFACE LOG_DIR=$LOG_DIR LOG_FLAT=${LOG_FLAT:-unset} SYSTEMD=${SYSTEMD:-unset} PATH=$PATH"
 
   if [ "$SYSTEMD" = "1" ]; then
     # Foreground mode for systemd: let zeek become the main process
-    echo "[DEBUG] Exec: zeek -C -i af_packet::$IFACE ${ZEEKSCRIPTS[*]} -e '$AF_REDEFS' -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
-    exec zeek -C -i "af_packet::$IFACE" \
+    echo "[DEBUG] Exec: zeek -C -i $CAP_INTF ${ZEEKSCRIPTS[*]} -e '$AF_REDEFS' -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
+    exec zeek -C -i "$CAP_INTF" \
       "${ZEEKSCRIPTS[@]}" \
       -e "$AF_REDEFS" \
       -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;"
   else
     # Background mode for manual usage
-    echo "[DEBUG] Spawn (bg): zeek -C -i af_packet::$IFACE ${ZEEKSCRIPTS[*]} -e '$AF_REDEFS' -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
-    nohup zeek -C -i "af_packet::$IFACE" \
+    echo "[DEBUG] Spawn (bg): zeek -C -i $CAP_INTF ${ZEEKSCRIPTS[*]} -e '$AF_REDEFS' -e 'redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;'"
+    nohup zeek -C -i "$CAP_INTF" \
       "${ZEEKSCRIPTS[@]}" \
       -e "$AF_REDEFS" \
       -e "redef Log::default_logdir=\"$RUN_DIR\"; redef LogAscii::use_json=T;" \

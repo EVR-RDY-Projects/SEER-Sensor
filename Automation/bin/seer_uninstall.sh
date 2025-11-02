@@ -98,6 +98,31 @@ disable_units "${ZEEK_UNITS[@]:-}"
 disable_units seer-move-oldest.timer seer-move-oldest.service seer-hotswap.service
 ok "services/timer stopped & disabled (where present)"
 
+# Belt-and-suspenders: ensure no lingering processes remain before removing units
+say "1b) Ensure capture/zeek/hotswap processes are not running"
+# Try systemd kill once more in case any template instances were transient
+stop_units "${CAPTURE_UNITS[@]:-}" "${ZEEK_UNITS[@]:-}" seer-hotswap.service
+
+# Direct process kills (handles cases where unit files vanish while processes keep running)
+pkill -x tcpdump 2>/dev/null || true
+pkill -x zeek 2>/dev/null || true
+pkill -f seer_hotswap.py 2>/dev/null || true
+
+# Wait briefly for termination
+for _ in 1 2 3 4 5; do
+  sleep 1
+  pgrep -x tcpdump >/dev/null 2>&1 || pgrep -x zeek >/dev/null 2>&1 || pgrep -f seer_hotswap.py >/dev/null 2>&1 || break
+done
+
+# Final force if anything still lingers
+pgrep -x tcpdump >/dev/null 2>&1 && pkill -9 -x tcpdump 2>/dev/null || true
+pgrep -x zeek >/dev/null 2>&1 && pkill -9 -x zeek 2>/dev/null || true
+pgrep -f seer_hotswap.py >/dev/null 2>&1 && pkill -9 -f seer_hotswap.py 2>/dev/null || true
+
+# Clean up known runtime files
+rm -f /run/zeek-*.pid /run/zeek-*.lock 2>/dev/null || true
+ok "lingering processes terminated"
+
 say "2) Remove systemd unit files"
 rm -f /etc/systemd/system/seer-capture@.service \
       /etc/systemd/system/seer-move-oldest.service \

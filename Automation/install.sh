@@ -145,7 +145,8 @@ if systemctl list-unit-files | grep -q seer-move-oldest.timer; then
   sudo systemctl enable --now seer-move-oldest.timer || true
 fi
 
-if systemctl list-unit-files | grep -q seer-hotswap.service; then
+# Enable and start hotswap unconditionally if the unit was installed
+if [[ -f /etc/systemd/system/seer-hotswap.service ]]; then
   echo "Enabling and starting seer-hotswap.service"
   sudo systemctl enable --now seer-hotswap.service || true
 fi
