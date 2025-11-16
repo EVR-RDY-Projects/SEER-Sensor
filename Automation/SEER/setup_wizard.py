@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import yaml
+import shlex
 
 DEFAULTS = {
     "interface": "enp2s0",
@@ -42,6 +43,8 @@ DEFAULTS = {
         "min_free_pct": 2,
         "poll_interval": 2,
     },
+    # How long (seconds) to wait for link at boot before starting capture
+    "wait_link_timeout": 60,
 }
 
 YAML_PATH = Path("/opt/seer/etc/seer.yml")
@@ -130,6 +133,66 @@ def write_yaml(cfg: dict) -> None:
     print(f"Wrote {YAML_PATH}")
 
 
+def install_wait_helper(iface: str) -> None:
+    """Install the wait-for-link helper script and a systemd drop-in so capture waits for link at boot.
+    This is best-effort and may require sudo.
+    """
+    # default timeout (seconds)
+    timeout = 60
+    try:
+        src = Path(__file__).parents[2] / 'bin' / 'seer-wait-link.sh'
+        dst = Path('/usr/local/bin/seer-wait-link.sh')
+        drop_dir = '/etc/systemd/system/seer-capture@.service.d'
+        drop_file = f"{drop_dir}/wait-link.conf"
+
+        if src.exists():
+            print(f"Installing wait helper to {dst}")
+            # copy with sudo
+            os.system(f"sudo install -m 0755 {shlex.quote(str(src))} {shlex.quote(str(dst))} || true")
+            os.system(f"sudo chown root:root {shlex.quote(str(dst))} || true")
+        else:
+            print("Warning: wait helper source not found; skipping installation of helper script.")
+
+        # If YAML exists, try to read configured timeout
+        try:
+            if YAML_PATH.exists():
+                cfg = yaml.safe_load(open(YAML_PATH)) or {}
+                timeout = int(cfg.get('wait_link_timeout', timeout))
+        except Exception:
+            pass
+
+        # write drop-in to call the helper before the service starts
+        content = f"""[Unit]\nDescription=Wait for link before starting capture\nBefore=seer-capture@%i.service\n\n[Service]\nExecStartPre=/usr/local/bin/seer-wait-link.sh %i {int(timeout)}\n"""
+        # Ensure drop-in directory exists and write the drop-in via sudo
+        os.system(f"sudo mkdir -p {shlex.quote(drop_dir)} || true")
+        cmd = f"echo {shlex.quote(content)} | sudo tee {shlex.quote(drop_file)} >/dev/null"
+        os.system(cmd)
+
+        # reload systemd so the drop-in is recognized
+        os.system("sudo systemctl daemon-reload || true")
+        # enable and restart the capture service for this iface
+        os.system(f"sudo systemctl enable --now seer-capture@{iface}.service || true")
+    except Exception as e:
+        print(f"Failed to install wait helper: {e}")
+
+
+def configure_monitor_iface(iface: str) -> None:
+    """Bring interface up, enable promiscuous mode, and disable common offloads.
+    Best-effort with sudo; prints a short status line.
+    """
+    if not iface or iface == "lo" or not iface_exists(iface):
+        print(f"Skipping NIC setup: invalid interface '{iface}'.")
+        return
+    print(f"Configuring monitor port: {iface} (UP, PROMISC on, offloads off)")
+    rc1 = os.system(f"sudo ip link set dev {iface} up >/dev/null 2>&1")
+    rc2 = os.system(f"sudo ip link set dev {iface} promisc on >/dev/null 2>&1")
+    # ethtool may not exist; that's fine
+    if shutil.which("ethtool"):
+        os.system(f"sudo ethtool -K {iface} gro off lro off tso off gso off >/dev/null 2>&1 || true")
+    # Show a brief confirmation line
+    os.system(f"ip -d link show {iface} | sed -n '1p' || true")
+
+
 def main(non_interactive: bool = False) -> None:
     print("== SEER Setup Wizard ==")
     cfg = DEFAULTS.copy()
@@ -150,6 +213,16 @@ def main(non_interactive: bool = False) -> None:
         ensure_dirs()
         backup_yaml()
         write_yaml(cfg)
+        # Apply monitor-port configuration immediately (best-effort)
+        try:
+            configure_monitor_iface(cfg["interface"])
+        except Exception:
+            print("Warning: NIC monitor configuration step failed (non-fatal). You can configure later with ip/ethtool.")
+        # Install wait-for-link helper and drop-in so capture waits for link at boot
+        try:
+            install_wait_helper(cfg["interface"])
+        except Exception:
+            print("Warning: failed to install wait-for-link helper (non-fatal)")
         print("Done. Next: install/start capture and mover services.")
         return
     else:
@@ -216,6 +289,16 @@ def main(non_interactive: bool = False) -> None:
     ensure_dirs()
     backup_yaml()
     write_yaml(cfg)
+    # Apply monitor-port configuration immediately (best-effort)
+    try:
+        configure_monitor_iface(cfg["interface"])
+    except Exception:
+        print("Warning: NIC monitor configuration step failed (non-fatal). You can configure later with ip/ethtool.")
+    # Install wait-for-link helper and drop-in so capture waits for link at boot
+    try:
+        install_wait_helper(cfg["interface"])
+    except Exception:
+        print("Warning: failed to install wait-for-link helper (non-fatal)")
     print("Done. Next: install/start capture and mover services.")
 
 

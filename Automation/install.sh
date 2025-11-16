@@ -122,8 +122,78 @@ PY
   )
 fi
 
+# Create a persistent NIC setup unit to ensure PROMISC and offloads are configured on boot
+echo "Installing persistent NIC monitor setup: seer-net-setup@.service"
+sudo tee /usr/local/bin/seer-net-setup.sh >/dev/null <<'EOS'
+#!/usr/bin/env bash
+set -euo pipefail
+IFACE=${1:?iface required}
+ip link set dev "$IFACE" up || true
+ip link set dev "$IFACE" promisc on || true
+if command -v ethtool >/dev/null 2>&1; then
+  ethtool -K "$IFACE" gro off lro off tso off gso off || true
+fi
+exit 0
+EOS
+sudo chmod 0755 /usr/local/bin/seer-net-setup.sh
+
+sudo tee /etc/systemd/system/seer-net-setup@.service >/dev/null <<'EOS'
+[Unit]
+Description=SEER NIC monitor-mode setup for %i
+After=network-pre.target
+Before=network.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/seer-net-setup.sh %i
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOS
+
+sudo systemctl daemon-reload
+echo "Enabling seer-net-setup@${INTERFACE}.service"
+sudo systemctl enable --now seer-net-setup@${INTERFACE}.service || true
+
+# Also apply NIC settings immediately in case the unit ordering hasn't run yet
+echo "Configuring monitor port now: ${INTERFACE} (UP, PROMISC, offloads off)"
+sudo /usr/local/bin/seer-net-setup.sh "${INTERFACE}" || true
+
 echo "Enabling and starting seer-capture@${INTERFACE}.service"
 sudo systemctl enable --now seer-capture@${INTERFACE}.service || true
+
+# Install wait-for-link helper and drop-in so capture waits for link at boot
+WAIT_LINK_TIMEOUT=60
+if [[ -f /opt/seer/etc/seer.yml ]]; then
+  WAIT_LINK_TIMEOUT=$(python3 - <<'PY'
+import yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    print(int(cfg.get('wait_link_timeout', 60)))
+except Exception:
+    print(60)
+PY
+)
+fi
+
+if [[ -f "$REPO_ROOT/Automation/bin/seer-wait-link.sh" ]]; then
+  echo "Installing seer-wait-link helper"
+  sudo install -m 0755 "$REPO_ROOT/Automation/bin/seer-wait-link.sh" /usr/local/bin/seer-wait-link.sh || true
+  sudo chown root:root /usr/local/bin/seer-wait-link.sh || true
+  echo "Writing systemd drop-in for seer-capture to wait for link"
+  sudo mkdir -p /etc/systemd/system/seer-capture@.service.d || true
+  sudo tee /etc/systemd/system/seer-capture@.service.d/wait-link.conf >/dev/null <<EOS
+[Unit]
+Description=Wait for link before starting capture
+Before=seer-capture@%i.service
+
+[Service]
+ExecStartPre=/usr/local/bin/seer-wait-link.sh %i ${WAIT_LINK_TIMEOUT}
+EOS
+  sudo systemctl daemon-reload || true
+fi
 
 # Enable and start Zeek (if unit is installed and zeek binary exists)
 if [[ -f /etc/systemd/system/seer-zeek@.service ]]; then
