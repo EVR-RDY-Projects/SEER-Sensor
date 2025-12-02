@@ -507,13 +507,28 @@ def render(stdscr):
             curses.use_default_colors()
         except Exception:
             pass
+
+        # Allow selecting a theme via environment variable for easy operator control.
+        # SEER_THEME=evr  -> EVR:RDY palette (teal-like active colors)
+        # SEER_THEME=classic -> original classic palette (green/yellow/cyan)
+        theme = os.environ.get("SEER_THEME", "evr").lower()
         try:
-            curses.init_pair(1, curses.COLOR_RED, -1)
-            curses.init_pair(2, curses.COLOR_GREEN, -1)
-            curses.init_pair(3, curses.COLOR_YELLOW, -1)
-            curses.init_pair(4, curses.COLOR_CYAN, -1)
-            curses.init_pair(5, curses.COLOR_WHITE, -1)
+            if theme == "classic":
+                # classic terminal-friendly mapping
+                curses.init_pair(1, curses.COLOR_RED, -1)    # failed
+                curses.init_pair(2, curses.COLOR_GREEN, -1)  # active
+                curses.init_pair(3, curses.COLOR_YELLOW, -1) # neutral
+                curses.init_pair(4, curses.COLOR_CYAN, -1)   # header/accent
+                curses.init_pair(5, curses.COLOR_WHITE, -1)  # normal
+            else:
+                # EVR:RDY-friendly mapping (term-safe approximation)
+                curses.init_pair(1, curses.COLOR_RED, -1)     # failed/error
+                curses.init_pair(2, curses.COLOR_CYAN, -1)    # active/connected (teal-like)
+                curses.init_pair(3, curses.COLOR_MAGENTA, -1) # inactive/stopped (muted)
+                curses.init_pair(4, curses.COLOR_BLUE, -1)    # header/accent
+                curses.init_pair(5, curses.COLOR_WHITE, -1)   # normal
         except curses.error:
+            # Fallback to a basic mapping using black background if default colors unsupported
             try:
                 curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
                 curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
@@ -642,7 +657,12 @@ def render(stdscr):
         
         # FULL MODE - Show everything
         hdr = f"SEER MONITOR  [REF: {REFRESH:.1f}s]  [HOST: {host}]  [TIME: {now.strftime('%H:%M:%S  %b %d %Y')}]"
-        draw_text(stdscr, 0, 0, w, hdr)
+        # Header: bold + accent color (pair 4)
+        try:
+            safe_addstr(stdscr, 0, 0, hdr, curses.color_pair(4) | curses.A_BOLD)
+        except Exception:
+            draw_text(stdscr, 0, 0, w, hdr)
+        divider(stdscr, 1, w)
         divider(stdscr, 1, w)
 
         # compute a simple write rate (bytes/sec) over the last refresh
@@ -662,27 +682,53 @@ def render(stdscr):
 
         left_w = w // 2 - 1
         right_w = w - left_w - 3
-        draw_text(stdscr, 2, 0, left_w, f"+ SYSTEM {'-' * (max(0, left_w-10))}")
-        draw_text(stdscr, 2, left_w + 1, right_w, f"+ CONTROLS {'-' * (max(0, right_w-12))}")
+        # Section titles: bold + header color
+        sec_left = f"+ SYSTEM {'-' * (max(0, left_w-10))}"
+        sec_right = f"+ CONTROLS {'-' * (max(0, right_w-12))}"
+        try:
+            safe_addstr(stdscr, 2, 0, sec_left, curses.color_pair(4) | curses.A_BOLD)
+            safe_addstr(stdscr, 2, left_w + 1, sec_right, curses.color_pair(4) | curses.A_BOLD)
+        except Exception:
+            draw_text(stdscr, 2, 0, left_w, sec_left)
+            draw_text(stdscr, 2, left_w + 1, right_w, sec_right)
         for r in range(3, 12):
             if left_w < w:
                 stdscr.addstr(r, left_w, "|")
 
         s, c = badge_text(cap_state)
         stdscr.addstr(3, 2, "  CAPTURE : ")
-        stdscr.addstr(3, 14, s, curses.color_pair(c))
+        try:
+            attr = curses.color_pair(c) | (curses.A_BOLD if c == 2 else 0)
+        except Exception:
+            attr = curses.A_BOLD if c == 2 else 0
+        stdscr.addstr(3, 14, s, attr)
         s, c = badge_text(mov_state)
         stdscr.addstr(4, 2, "  MOVER   : ")
-        stdscr.addstr(4, 14, s, curses.color_pair(c))
+        try:
+            attr = curses.color_pair(c) | (curses.A_BOLD if c == 2 else 0)
+        except Exception:
+            attr = curses.A_NORMAL
+        stdscr.addstr(4, 14, s, attr)
         stdscr.addstr(5, 2, f"  TIMER   : {tim_state}")
         stdscr.addstr(6, 2, f"  ZEEK    : {zeek_state}")
         s, c = badge_text(hot_state)
         stdscr.addstr(7, 2, "  HOTSWAP : ")
-        stdscr.addstr(7, 14, s, curses.color_pair(c))
+        try:
+            attr = curses.color_pair(c) | (curses.A_BOLD if c == 2 else 0)
+        except Exception:
+            attr = curses.A_NORMAL
+        stdscr.addstr(7, 14, s, attr)
 
         stdscr.addstr(8, 0, "PCAP:")
-        stdscr.addstr(9, 2, f"  Ring        : {buff_count:<5}")
-        stdscr.addstr(10, 2, f"  Backlog     : {back_count:<5}")
+        # PCAP counts: make numeric values use the active/accent color for visibility
+        try:
+            stdscr.addstr(9, 2, f"  Ring        : ")
+            stdscr.addstr(9, 21, f"{buff_count:<5}", curses.color_pair(2) | curses.A_BOLD)
+            stdscr.addstr(10, 2, f"  Backlog     : ")
+            stdscr.addstr(10, 21, f"{back_count:<5}", curses.color_pair(3) | curses.A_DIM)
+        except Exception:
+            stdscr.addstr(9, 2, f"  Ring        : {buff_count:<5}")
+            stdscr.addstr(10, 2, f"  Backlog     : {back_count:<5}")
         
         # Show drive status and destination
         if drive_present:
@@ -693,23 +739,69 @@ def render(stdscr):
                 if os.path.ismount(candidate):
                     active_mount = candidate
                     break
-            stdscr.addstr(11, 2, f"  Drive       : ", curses.color_pair(2))
-            stdscr.addstr(11, 17, f"CONNECTED")
-            stdscr.addstr(12, 2, f"  Mount       : {active_mount}")
-            stdscr.addstr(13, 2, f"  On Drive    : {drive_pcap_count} files")
+            try:
+                # Drive connected: label in accent, value bold
+                stdscr.addstr(11, 2, f"  Drive       : ", curses.color_pair(5))
+                stdscr.addstr(11, 17, f"CONNECTED", curses.color_pair(2) | curses.A_BOLD)
+                stdscr.addstr(12, 2, f"  Mount       : ")
+                stdscr.addstr(12, 16, f"{active_mount}", curses.color_pair(5))
+                stdscr.addstr(13, 2, f"  On Drive    : ")
+                stdscr.addstr(13, 16, f"{drive_pcap_count} files", curses.color_pair(2))
+            except Exception:
+                stdscr.addstr(11, 2, f"  Drive       : CONNECTED")
+                stdscr.addstr(12, 2, f"  Mount       : {active_mount}")
+                stdscr.addstr(13, 2, f"  On Drive    : {drive_pcap_count} files")
         else:
             stdscr.addstr(11, 2, f"  Drive       : ", curses.color_pair(3))
             stdscr.addstr(11, 17, f"not connected")
         
-        stdscr.addstr(14, 0, "JSON:")
-        stdscr.addstr(15, 2, f"  Captured    : {human_bytes(j_bytes):<12}")
+        # JSON stats: size in accent color
+        try:
+            stdscr.addstr(14, 0, "JSON:")
+            stdscr.addstr(15, 2, f"  Captured    : ")
+            stdscr.addstr(15, 18, f"{human_bytes(j_bytes):<12}", curses.color_pair(2) | curses.A_BOLD)
+        except Exception:
+            stdscr.addstr(14, 0, "JSON:")
+            stdscr.addstr(15, 2, f"  Captured    : {human_bytes(j_bytes):<12}")
 
-        stdscr.addstr(3, left_w + 2, "[1] Stop   [3] Start")
-        stdscr.addstr(4, left_w + 2, "[2] Mount/Unmount Drive")
-        stdscr.addstr(5, left_w + 2, "[z] Zeek Start  [x] Stop")
-        stdscr.addstr(7, left_w + 2, "[c] Cap [m] Mov [h] Hot")
-        stdscr.addstr(8, left_w + 2, "[s] Status  [+/-] Speed")
-        stdscr.addstr(10, left_w + 2, "[?] Help    [q] Quit")
+        # Controls: make keys accent colored for quick scanning
+        try:
+            stdscr.addstr(3, left_w + 2, "[1] " )
+            stdscr.addstr(3, left_w + 6, "Stop", curses.color_pair(1))
+            stdscr.addstr(3, left_w + 12, "   [3] ")
+            stdscr.addstr(3, left_w + 18, "Start", curses.color_pair(2) | curses.A_BOLD)
+
+            stdscr.addstr(4, left_w + 2, "[2] ")
+            stdscr.addstr(4, left_w + 6, "Mount/Unmount Drive", curses.color_pair(5))
+
+            stdscr.addstr(5, left_w + 2, "[z] ")
+            stdscr.addstr(5, left_w + 6, "Zeek Start", curses.color_pair(2))
+            stdscr.addstr(5, left_w + 20, "[x] ")
+            stdscr.addstr(5, left_w + 24, "Stop", curses.color_pair(1))
+
+            stdscr.addstr(7, left_w + 2, "[c] ")
+            stdscr.addstr(7, left_w + 6, "Cap", curses.color_pair(5))
+            stdscr.addstr(7, left_w + 12, "[m] ")
+            stdscr.addstr(7, left_w + 16, "Mov", curses.color_pair(5))
+            stdscr.addstr(7, left_w + 22, "[h] ")
+            stdscr.addstr(7, left_w + 26, "Hot", curses.color_pair(5))
+
+            stdscr.addstr(8, left_w + 2, "[s] ")
+            stdscr.addstr(8, left_w + 6, "Status", curses.color_pair(5))
+            stdscr.addstr(8, left_w + 16, "[+/-] ")
+            stdscr.addstr(8, left_w + 22, "Speed", curses.color_pair(5))
+
+            stdscr.addstr(10, left_w + 2, "[?] ")
+            stdscr.addstr(10, left_w + 6, "Help", curses.color_pair(4) | curses.A_BOLD)
+            stdscr.addstr(10, left_w + 16, "[q] ")
+            stdscr.addstr(10, left_w + 20, "Quit", curses.color_pair(5))
+        except Exception:
+            stdscr.addstr(3, left_w + 2, "[1] Stop   [3] Start")
+            stdscr.addstr(4, left_w + 2, "[2] Mount/Unmount Drive")
+            stdscr.addstr(5, left_w + 2, "[z] Zeek Start  [x] Stop")
+            stdscr.addstr(7, left_w + 2, "[c] Cap [m] Mov [h] Hot")
+            stdscr.addstr(8, left_w + 2, "[s] Status  [+/-] Speed")
+            stdscr.addstr(10, left_w + 2, "[?] Help    [q] Quit")
 
         divider(stdscr, 19, w)
         # Show status message if recent (within 5 seconds); otherwise show last input

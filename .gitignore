@@ -10,3 +10,9 @@ venv/
 # Editors
 .vscode/
 .idea/
+
+# v2 console prototype and design mockups (not for production)
+Automation/bin/seer_console_v2.py
+Automation/bin/README_seer_console_v2.md
+Automation/requirements-console-v2.txt
+Automation/design/
