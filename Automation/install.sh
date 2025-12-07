@@ -108,25 +108,34 @@ if [[ -d "$REPO_ROOT/Automation/SEER/scout_receiver" ]]; then
   # Create directories for Scout Receiver
   sudo mkdir -p /var/seer/scout_data
   sudo mkdir -p /opt/seer/Automation/SEER/scout_receiver
+  sudo mkdir -p /opt/seer/Automation/SEER/scout_receiver/utils
+
+  # Create __init__.py for SEER package so Python can find the module
+  sudo touch /opt/seer/Automation/__init__.py
+  sudo touch /opt/seer/Automation/SEER/__init__.py
 
   # Copy scout_receiver module to /opt/seer
   sudo cp -r "$REPO_ROOT/Automation/SEER/scout_receiver"/* /opt/seer/Automation/SEER/scout_receiver/
 
   # Set ownership
   sudo chown -R seer:seer /var/seer/scout_data 2>/dev/null || true
-  sudo chown -R seer:seer /opt/seer/Automation/SEER/scout_receiver 2>/dev/null || true
+  sudo chown -R seer:seer /opt/seer/Automation 2>/dev/null || true
+
+  # Create virtualenv if it doesn't exist and install dependencies
+  if [[ ! -d /opt/seer/venv ]]; then
+    echo "Creating Python virtualenv at /opt/seer/venv..."
+    sudo python3 -m venv /opt/seer/venv
+    sudo chown -R seer:seer /opt/seer/venv
+  fi
 
   # Install Python dependencies for Scout Receiver
   if [[ -f "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" ]]; then
     echo "Installing Scout Receiver Python dependencies..."
-    if [[ -d /opt/seer/venv ]]; then
-      sudo /opt/seer/venv/bin/pip install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || {
-        echo "WARNING: Failed to install Scout Receiver dependencies via venv; trying system pip" >&2
-        sudo pip3 install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || true
-      }
-    else
+    sudo /opt/seer/venv/bin/pip install --upgrade pip -q || true
+    sudo /opt/seer/venv/bin/pip install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || {
+      echo "WARNING: Failed to install Scout Receiver dependencies via venv; trying system pip" >&2
       sudo pip3 install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || true
-    fi
+    }
   fi
 
   # Install Scout Receiver systemd service
