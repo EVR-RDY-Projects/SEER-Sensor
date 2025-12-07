@@ -184,6 +184,9 @@ class DataValidator:
     def validate_event_data(self, events: List[Dict[str, Any]]) -> ValidationResult:
         """Validate event log data format.
 
+        Supports both legacy format (type, timestamp) and ASIM schema
+        (EventType, TimeGenerated).
+
         Args:
             events: List of event entries to validate
 
@@ -201,10 +204,13 @@ class DataValidator:
             'total_events': len(events),
             'valid_events': 0,
             'invalid_events': 0,
-            'validation_errors': []
+            'validation_errors': [],
+            'schema_type': 'unknown'
         }
 
-        required_event_fields = ['type', 'timestamp']
+        # Support both legacy and ASIM schema field names
+        legacy_type_fields = ['type', 'timestamp']
+        asim_type_fields = ['EventType', 'TimeGenerated']
 
         for i, event in enumerate(events):
             if not isinstance(event, dict):
@@ -215,24 +221,39 @@ class DataValidator:
                 })
                 continue
 
-            missing = [f for f in required_event_fields if f not in event]
-            if missing:
+            # Check for ASIM schema fields first
+            has_asim = all(f in event for f in asim_type_fields)
+            has_legacy = all(f in event for f in legacy_type_fields)
+
+            if has_asim:
+                details['valid_events'] += 1
+                if details['schema_type'] == 'unknown':
+                    details['schema_type'] = 'ASIM'
+            elif has_legacy:
+                details['valid_events'] += 1
+                if details['schema_type'] == 'unknown':
+                    details['schema_type'] = 'legacy'
+            else:
+                # Check what's missing from either schema
+                missing_asim = [f for f in asim_type_fields if f not in event]
+                missing_legacy = [f for f in legacy_type_fields if f not in event]
                 details['invalid_events'] += 1
                 details['validation_errors'].append({
                     'index': i,
-                    'error': f'Missing fields: {missing}'
+                    'error': f'Missing fields (ASIM: {missing_asim}, legacy: {missing_legacy})'
                 })
-            else:
-                details['valid_events'] += 1
 
         is_valid = details['invalid_events'] == 0
         message = (f"Event validation: {details['valid_events']} valid, "
-                  f"{details['invalid_events']} invalid")
+                  f"{details['invalid_events']} invalid (schema: {details['schema_type']})")
 
         return ValidationResult(is_valid, message, details)
 
     def validate_system_data(self, changes: List[Dict[str, Any]]) -> ValidationResult:
         """Validate system state change data format.
+
+        Supports both legacy format (type, timestamp) and ASIM schema
+        (EventType, TimeGenerated, EventSchema).
 
         Args:
             changes: List of system changes to validate
@@ -251,10 +272,14 @@ class DataValidator:
             'total_changes': len(changes),
             'valid_changes': 0,
             'invalid_changes': 0,
-            'validation_errors': []
+            'validation_errors': [],
+            'schema_type': 'unknown',
+            'schema_breakdown': {}
         }
 
-        required_fields = ['type', 'timestamp']
+        # Support both legacy and ASIM schema field names
+        legacy_fields = ['type', 'timestamp']
+        asim_fields = ['EventType', 'TimeGenerated']
 
         for i, change in enumerate(changes):
             if not isinstance(change, dict):
@@ -265,19 +290,35 @@ class DataValidator:
                 })
                 continue
 
-            missing = [f for f in required_fields if f not in change]
-            if missing:
+            # Check for ASIM schema fields first
+            has_asim = all(f in change for f in asim_fields)
+            has_legacy = all(f in change for f in legacy_fields)
+
+            if has_asim:
+                details['valid_changes'] += 1
+                if details['schema_type'] == 'unknown':
+                    details['schema_type'] = 'ASIM'
+                # Track ASIM schema types
+                event_schema = change.get('EventSchema', 'Unknown')
+                details['schema_breakdown'][event_schema] = \
+                    details['schema_breakdown'].get(event_schema, 0) + 1
+            elif has_legacy:
+                details['valid_changes'] += 1
+                if details['schema_type'] == 'unknown':
+                    details['schema_type'] = 'legacy'
+            else:
+                # Check what's missing from either schema
+                missing_asim = [f for f in asim_fields if f not in change]
+                missing_legacy = [f for f in legacy_fields if f not in change]
                 details['invalid_changes'] += 1
                 details['validation_errors'].append({
                     'index': i,
-                    'error': f'Missing fields: {missing}'
+                    'error': f'Missing fields (ASIM: {missing_asim}, legacy: {missing_legacy})'
                 })
-            else:
-                details['valid_changes'] += 1
 
         is_valid = details['invalid_changes'] == 0
         message = (f"System change validation: {details['valid_changes']} valid, "
-                  f"{details['invalid_changes']} invalid")
+                  f"{details['invalid_changes']} invalid (schema: {details['schema_type']})")
 
         return ValidationResult(is_valid, message, details)
 
