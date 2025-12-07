@@ -99,6 +99,7 @@ class ScoutReceiverServer:
         router.add_get('/api/data', self._handle_api_data)
         router.add_get('/api/statistics', self._handle_api_statistics)
         router.add_get('/api/storage', self._handle_api_storage)
+        router.add_get('/api/system', self._handle_api_system)
         router.add_get('/ws', self._handle_websocket)
 
     def _setup_cors(self) -> None:
@@ -452,6 +453,140 @@ class ScoutReceiverServer:
         """Return storage statistics."""
         return web.json_response(self.storage.get_storage_stats())
 
+    async def _handle_api_system(self, request: Request) -> Response:
+        """Return system component statuses including services, PCAP, and drive info."""
+        import subprocess
+        import os
+        import glob
+        from pathlib import Path
+
+        def run_cmd(cmd):
+            """Run a command and return stdout."""
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                return result.stdout.strip() if result.returncode == 0 else result.stderr.strip()
+            except Exception:
+                return 'unknown'
+
+        def systemctl_is_active(unit):
+            """Check if a systemd service is active."""
+            if not unit:
+                return 'inactive'
+            result = run_cmd(['systemctl', 'is-active', unit])
+            return result if result else 'inactive'
+
+        def count_pcaps(path):
+            """Count .pcap* files in a directory."""
+            try:
+                return sum(1 for _ in glob.glob(os.path.join(path, '*.pcap*')))
+            except Exception:
+                return 0
+
+        def read_yaml_config():
+            """Read SEER YAML config."""
+            try:
+                import yaml
+                with open('/opt/seer/etc/seer.yml') as f:
+                    return yaml.safe_load(f) or {}
+            except Exception:
+                return {}
+
+        def read_hotswap_state():
+            """Read hotswap state file."""
+            try:
+                import json
+                with open('/var/log/seer/hotswap_state.json') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+
+        def json_stats(path):
+            """Return file count and total bytes for JSON/log files."""
+            try:
+                patterns = ['**/*.json*', '**/*.log', '**/*.log.json*']
+                seen = set()
+                total = 0
+                for pat in patterns:
+                    for p in glob.glob(os.path.join(path, pat), recursive=True):
+                        if os.path.isdir(p) or p in seen:
+                            continue
+                        seen.add(p)
+                        try:
+                            total += os.stat(p).st_size
+                        except FileNotFoundError:
+                            pass
+                return {'count': len(seen), 'bytes': total}
+            except Exception:
+                return {'count': 0, 'bytes': 0}
+
+        # Load config
+        cfg = read_yaml_config()
+        iface = cfg.get('interface', 'enp2s0')
+
+        # Service statuses
+        services = {
+            'capture': systemctl_is_active(f'seer-capture@{iface}.service'),
+            'mover': systemctl_is_active('seer-move-oldest.service'),
+            'timer': systemctl_is_active('seer-move-oldest.timer'),
+            'zeek': systemctl_is_active(f'seer-zeek@{iface}.service'),
+            'hotswap': systemctl_is_active('seer-hotswap.service'),
+            'receiver': 'active',  # We know this is active since we're responding
+        }
+
+        # PCAP counts
+        ring_dir = cfg.get('ring_dir', '/var/seer/pcap_ring')
+        dest_dir = cfg.get('dest_dir', '/opt/seer/var/queue')
+        backlog_dir = cfg.get('backlog_dir', '/opt/seer/var/backlog')
+
+        pcap = {
+            'ring': count_pcaps(ring_dir),
+            'queue': count_pcaps(dest_dir),
+            'backlog': count_pcaps(backlog_dir),
+        }
+
+        # Export drive status
+        hs_state = read_hotswap_state()
+        drive_present = hs_state.get('drive_present', False)
+        mount_candidates = cfg.get('export', {}).get('mount_candidates', ['/mnt/seer_external'])
+        active_mount = None
+        drive_files = 0
+
+        for candidate in mount_candidates:
+            if os.path.ismount(candidate):
+                active_mount = candidate
+                try:
+                    drive_files = sum(1 for _ in Path(candidate).rglob('*.pcap*'))
+                except Exception:
+                    pass
+                break
+
+        export_drive = {
+            'present': drive_present,
+            'mounted': active_mount is not None,
+            'mount_point': active_mount,
+            'files': drive_files,
+            'last_export': hs_state.get('last_export_ts'),
+            'total_exported': hs_state.get('total_exported', 0),
+        }
+
+        # JSON/Zeek stats
+        json_spool = cfg.get('json_spool', '/var/seer/json_spool')
+        json_data = json_stats(json_spool)
+
+        return web.json_response({
+            'services': services,
+            'pcap': pcap,
+            'export_drive': export_drive,
+            'json': json_data,
+            'config': {
+                'interface': iface,
+                'ring_dir': ring_dir,
+                'dest_dir': dest_dir,
+                'backlog_dir': backlog_dir,
+                'json_spool': json_spool,
+            }
+        })
+
     async def _handle_websocket(self, request: Request) -> Response:
         """Handle WebSocket connections for real-time updates."""
         ws = web.WebSocketResponse()
@@ -510,57 +645,117 @@ class ScoutReceiverServer:
         self.websocket_connections -= disconnected
 
     def _generate_dashboard_html(self) -> str:
-        """Generate the monitoring dashboard HTML."""
+        """Generate the comprehensive SEER monitoring dashboard HTML."""
         return '''<!DOCTYPE html>
 <html>
 <head>
-    <title>Scout Receiver Dashboard</title>
+    <title>SEER Sensor Dashboard</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                background: #1a1a2e; color: #eee; padding: 20px; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        h1 { color: #00d4ff; margin-bottom: 20px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .card { background: #16213e; border-radius: 8px; padding: 20px; }
-        .card h2 { color: #00d4ff; font-size: 1.1em; margin-bottom: 15px; border-bottom: 1px solid #0f3460; padding-bottom: 10px; }
-        .stat { display: flex; justify-content: space-between; margin: 8px 0; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        h1 { color: #00d4ff; }
+        .header-info { color: #888; font-size: 0.9em; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
+        .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 15px; }
+        .card { background: #16213e; border-radius: 8px; padding: 15px; }
+        .card h2 { color: #00d4ff; font-size: 1em; margin-bottom: 12px; border-bottom: 1px solid #0f3460; padding-bottom: 8px; }
+        .card h3 { color: #888; font-size: 0.85em; margin: 10px 0 8px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat { display: flex; justify-content: space-between; margin: 6px 0; font-size: 0.9em; }
         .stat-label { color: #888; }
         .stat-value { color: #00d4ff; font-weight: bold; }
-        .data-entry { background: #0f3460; padding: 10px; margin: 5px 0; border-radius: 4px; font-size: 0.9em; }
+        .stat-value.warning { color: #ffaa00; }
+        .stat-value.error { color: #ff4444; }
+        .stat-value.success { color: #00ff88; }
+        .data-entry { background: #0f3460; padding: 10px; margin: 5px 0; border-radius: 4px; font-size: 0.85em; }
         .data-entry.success { border-left: 3px solid #00ff88; }
         .data-entry.error { border-left: 3px solid #ff4444; }
-        .refresh-btn { background: #00d4ff; color: #1a1a2e; border: none; padding: 10px 20px;
-                      border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .refresh-btn { background: #00d4ff; color: #1a1a2e; border: none; padding: 8px 16px;
+                      border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.9em; }
         .refresh-btn:hover { background: #00a8cc; }
-        .status-badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 0.8em; }
-        .status-badge.healthy { background: #00ff88; color: #000; }
+        .status-badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 0.75em; font-weight: bold; }
+        .status-badge.active { background: #00ff88; color: #000; }
         .status-badge.running { background: #00d4ff; color: #000; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #0f3460; }
-        th { color: #888; font-weight: normal; }
+        .status-badge.inactive { background: #666; color: #fff; }
+        .status-badge.failed { background: #ff4444; color: #fff; }
+        .status-badge.unknown { background: #444; color: #888; }
+        .status-badge.healthy { background: #00ff88; color: #000; }
+        .status-badge.degraded { background: #ffaa00; color: #000; }
+        .status-badge.idle { background: #666; color: #fff; }
+        .service-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #0f3460; }
+        .service-row:last-child { border-bottom: none; }
+        .service-name { color: #ccc; font-size: 0.9em; }
+        .section-title { color: #00d4ff; font-size: 0.9em; margin: 15px 0 10px 0; padding-top: 10px; border-top: 1px solid #0f3460; }
+        .mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.85em; }
+        th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #0f3460; }
+        th { color: #888; font-weight: normal; font-size: 0.8em; text-transform: uppercase; }
+        .timestamp { color: #666; font-size: 0.8em; }
+        .auto-refresh { display: flex; align-items: center; gap: 10px; }
+        .auto-refresh label { color: #888; font-size: 0.85em; }
+        #last-update { color: #666; font-size: 0.8em; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Scout Receiver Dashboard</h1>
-        <button class="refresh-btn" onclick="refreshData()">Refresh</button>
+        <div class="header">
+            <h1>SEER Sensor Dashboard</h1>
+            <div class="header-info">
+                <div class="auto-refresh">
+                    <button class="refresh-btn" onclick="refreshData()">Refresh</button>
+                    <label><input type="checkbox" id="auto-refresh" checked> Auto (5s)</label>
+                    <span id="last-update"></span>
+                </div>
+            </div>
+        </div>
 
-        <div class="grid" style="margin-top: 20px;">
+        <!-- Services Status Row -->
+        <div class="grid" style="margin-bottom: 15px;">
             <div class="card">
-                <h2>Server Status</h2>
-                <div class="stat"><span class="stat-label">Status</span><span id="status" class="status-badge">Loading...</span></div>
-                <div class="stat"><span class="stat-label">Uptime</span><span id="uptime" class="stat-value">-</span></div>
-                <div class="stat"><span class="stat-label">Total Requests</span><span id="total-requests" class="stat-value">-</span></div>
-                <div class="stat"><span class="stat-label">Success Rate</span><span id="success-rate" class="stat-value">-</span></div>
+                <h2>System Services</h2>
+                <div class="service-row">
+                    <span class="service-name">Capture</span>
+                    <span id="svc-capture" class="status-badge unknown">--</span>
+                </div>
+                <div class="service-row">
+                    <span class="service-name">Mover</span>
+                    <span id="svc-mover" class="status-badge unknown">--</span>
+                </div>
+                <div class="service-row">
+                    <span class="service-name">Timer</span>
+                    <span id="svc-timer" class="status-badge unknown">--</span>
+                </div>
+                <div class="service-row">
+                    <span class="service-name">Zeek</span>
+                    <span id="svc-zeek" class="status-badge unknown">--</span>
+                </div>
+                <div class="service-row">
+                    <span class="service-name">Hotswap</span>
+                    <span id="svc-hotswap" class="status-badge unknown">--</span>
+                </div>
+                <div class="service-row">
+                    <span class="service-name">Scout Receiver</span>
+                    <span id="svc-receiver" class="status-badge unknown">--</span>
+                </div>
             </div>
 
             <div class="card">
-                <h2>Data Statistics</h2>
+                <h2>Scout Receiver</h2>
+                <div class="stat"><span class="stat-label">Status</span><span id="recv-status" class="status-badge unknown">--</span></div>
+                <div class="stat"><span class="stat-label">Uptime</span><span id="recv-uptime" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Requests</span><span id="recv-requests" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Success Rate</span><span id="recv-success" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Requests/min</span><span id="recv-rpm" class="stat-value">-</span></div>
+            </div>
+
+            <div class="card">
+                <h2>Data Reception</h2>
                 <div class="stat"><span class="stat-label">Data Received</span><span id="data-received" class="stat-value">-</span></div>
-                <div class="stat"><span class="stat-label">Records Processed</span><span id="records" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Records</span><span id="records" class="stat-value">-</span></div>
                 <div class="stat"><span class="stat-label">Unique Sources</span><span id="sources" class="stat-value">-</span></div>
                 <div class="stat"><span class="stat-label">Avg Processing</span><span id="avg-time" class="stat-value">-</span></div>
             </div>
@@ -570,58 +765,263 @@ class ScoutReceiverServer:
                 <div class="stat"><span class="stat-label">Files Created</span><span id="files-created" class="stat-value">-</span></div>
                 <div class="stat"><span class="stat-label">Total Size</span><span id="storage-size" class="stat-value">-</span></div>
                 <div class="stat"><span class="stat-label">Disk Free</span><span id="disk-free" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Retention</span><span id="retention" class="stat-value">-</span></div>
             </div>
         </div>
 
-        <div class="card" style="margin-top: 20px;">
-            <h2>Recent Data</h2>
-            <div id="recent-data">Loading...</div>
+        <!-- PCAP and JSON Stats -->
+        <div class="grid" style="margin-bottom: 15px;">
+            <div class="card">
+                <h2>PCAP Status</h2>
+                <div class="stat"><span class="stat-label">Ring Buffer</span><span id="pcap-ring" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Backlog</span><span id="pcap-backlog" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Queue</span><span id="pcap-queue" class="stat-value">-</span></div>
+            </div>
+
+            <div class="card">
+                <h2>Export Drive</h2>
+                <div class="stat"><span class="stat-label">Status</span><span id="drive-status" class="status-badge unknown">--</span></div>
+                <div class="stat"><span class="stat-label">Mount Point</span><span id="drive-mount" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Files on Drive</span><span id="drive-files" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Last Export</span><span id="drive-export" class="stat-value">-</span></div>
+            </div>
+
+            <div class="card">
+                <h2>JSON/Zeek Data</h2>
+                <div class="stat"><span class="stat-label">File Count</span><span id="json-count" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Total Size</span><span id="json-size" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Write Rate</span><span id="json-rate" class="stat-value">-</span></div>
+            </div>
+
+            <div class="card">
+                <h2>Validation</h2>
+                <div class="stat"><span class="stat-label">Total Validated</span><span id="val-total" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Successful</span><span id="val-success" class="stat-value success">-</span></div>
+                <div class="stat"><span class="stat-label">Failed</span><span id="val-failed" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Checksum Errors</span><span id="val-checksum" class="stat-value">-</span></div>
+            </div>
+        </div>
+
+        <!-- Source Breakdown and Recent Data -->
+        <div class="grid-2">
+            <div class="card">
+                <h2>Connected Agents</h2>
+                <table>
+                    <thead>
+                        <tr><th>Source IP</th><th>Requests</th><th>Data</th><th>Last Seen</th></tr>
+                    </thead>
+                    <tbody id="source-table">
+                        <tr><td colspan="4" style="color: #666;">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Recent Activity</h2>
+                <div id="recent-data">Loading...</div>
+            </div>
         </div>
     </div>
 
     <script>
+        let refreshInterval = null;
+
+        function formatBytes(bytes) {
+            if (bytes === 0 || bytes === undefined) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function formatUptime(seconds) {
+            if (!seconds) return '-';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}h ${m}m`;
+            if (m > 0) return `${m}m ${s}s`;
+            return `${s}s`;
+        }
+
+        function getStatusBadge(state) {
+            const s = (state || '').toLowerCase();
+            if (s === 'active' || s === 'running') return { text: 'ACTIVE', class: 'active' };
+            if (s === 'failed') return { text: 'FAILED', class: 'failed' };
+            if (s === 'inactive' || s === 'dead' || s === 'stopped') return { text: 'STOPPED', class: 'inactive' };
+            if (s.startsWith('activat')) return { text: 'STARTING', class: 'inactive' };
+            return { text: s || 'N/A', class: 'unknown' };
+        }
+
+        function getHealthBadge(stats) {
+            if (!stats || stats.total_requests === 0) return { text: 'IDLE', class: 'idle' };
+            if (stats.success_rate >= 99) return { text: 'HEALTHY', class: 'healthy' };
+            if (stats.success_rate >= 95) return { text: 'DEGRADED', class: 'degraded' };
+            return { text: 'UNHEALTHY', class: 'failed' };
+        }
+
         async function refreshData() {
             try {
-                const [statsRes, dataRes, storageRes] = await Promise.all([
+                const [statsRes, dataRes, storageRes, statusRes, systemRes] = await Promise.all([
                     fetch('/api/statistics'),
-                    fetch('/api/data?limit=10'),
-                    fetch('/api/storage')
+                    fetch('/api/data?limit=8'),
+                    fetch('/api/storage'),
+                    fetch('/scout/status'),
+                    fetch('/api/system')
                 ]);
 
                 const stats = await statsRes.json();
                 const data = await dataRes.json();
                 const storage = await storageRes.json();
+                const status = await statusRes.json();
+                const system = await systemRes.json();
 
-                document.getElementById('status').textContent = 'Running';
-                document.getElementById('status').className = 'status-badge running';
-                document.getElementById('uptime').textContent = Math.round(stats.uptime_seconds) + 's';
-                document.getElementById('total-requests').textContent = stats.total_requests;
-                document.getElementById('success-rate').textContent = stats.success_rate + '%';
-                document.getElementById('data-received').textContent = stats.total_data_received_mb + ' MB';
-                document.getElementById('records').textContent = stats.total_records_received;
-                document.getElementById('sources').textContent = stats.unique_sources;
-                document.getElementById('avg-time').textContent = (stats.average_processing_time * 1000).toFixed(1) + 'ms';
+                // Update last refresh time
+                document.getElementById('last-update').textContent =
+                    'Updated: ' + new Date().toLocaleTimeString();
 
-                document.getElementById('files-created').textContent = storage.files_created || storage.total_files || 0;
-                document.getElementById('storage-size').textContent = (storage.total_size_mb || 0) + ' MB';
-                document.getElementById('disk-free').textContent = (storage.disk_free_pct || 'N/A') + '%';
+                // Update service statuses
+                if (system.services) {
+                    const svc = system.services;
+                    ['capture', 'mover', 'timer', 'zeek', 'hotswap', 'receiver'].forEach(name => {
+                        const badge = getStatusBadge(svc[name]);
+                        const el = document.getElementById('svc-' + name);
+                        if (el) {
+                            el.textContent = badge.text;
+                            el.className = 'status-badge ' + badge.class;
+                        }
+                    });
+                }
 
+                // PCAP counts
+                if (system.pcap) {
+                    document.getElementById('pcap-ring').textContent = system.pcap.ring || 0;
+                    document.getElementById('pcap-backlog').textContent = system.pcap.backlog || 0;
+                    document.getElementById('pcap-queue').textContent = system.pcap.queue || 0;
+                }
+
+                // Export drive
+                if (system.export_drive) {
+                    const drv = system.export_drive;
+                    const driveEl = document.getElementById('drive-status');
+                    if (drv.mounted) {
+                        driveEl.textContent = 'CONNECTED';
+                        driveEl.className = 'status-badge active';
+                    } else if (drv.present) {
+                        driveEl.textContent = 'PRESENT';
+                        driveEl.className = 'status-badge inactive';
+                    } else {
+                        driveEl.textContent = 'NOT CONNECTED';
+                        driveEl.className = 'status-badge inactive';
+                    }
+                    document.getElementById('drive-mount').textContent = drv.mount_point || '-';
+                    document.getElementById('drive-files').textContent = drv.files || 0;
+                    document.getElementById('drive-export').textContent = drv.last_export || 'never';
+                }
+
+                // JSON/Zeek stats
+                if (system.json) {
+                    document.getElementById('json-count').textContent = system.json.count || 0;
+                    document.getElementById('json-size').textContent = formatBytes(system.json.bytes);
+                    document.getElementById('json-rate').textContent = '-'; // Would need rate tracking
+                }
+
+                // Scout Receiver Status
+                const health = getHealthBadge(stats);
+                document.getElementById('recv-status').textContent = health.text;
+                document.getElementById('recv-status').className = 'status-badge ' + health.class;
+                document.getElementById('recv-uptime').textContent = formatUptime(stats.uptime_seconds);
+                document.getElementById('recv-requests').textContent = stats.total_requests || 0;
+                document.getElementById('recv-success').textContent = (stats.success_rate || 0) + '%';
+                document.getElementById('recv-rpm').textContent = (stats.requests_per_minute || 0).toFixed(1);
+
+                // Data Reception
+                document.getElementById('data-received').textContent = (stats.total_data_received_mb || 0) + ' MB';
+                document.getElementById('records').textContent = stats.total_records_received || 0;
+                document.getElementById('sources').textContent = stats.unique_sources || 0;
+                document.getElementById('avg-time').textContent =
+                    ((stats.average_processing_time || 0) * 1000).toFixed(1) + 'ms';
+
+                // Storage
+                document.getElementById('files-created').textContent =
+                    storage.files_created || storage.total_files || 0;
+                document.getElementById('storage-size').textContent =
+                    (storage.total_size_mb || 0).toFixed(1) + ' MB';
+                const diskFree = storage.disk_free_pct;
+                const diskFreeEl = document.getElementById('disk-free');
+                diskFreeEl.textContent = (diskFree !== undefined ? diskFree + '%' : 'N/A');
+                if (diskFree !== undefined && diskFree < 10) {
+                    diskFreeEl.classList.add('error');
+                } else if (diskFree !== undefined && diskFree < 25) {
+                    diskFreeEl.classList.add('warning');
+                }
+                document.getElementById('retention').textContent =
+                    (storage.retention_days || 30) + ' days';
+
+                // Validation stats from status
+                if (status.validation_statistics) {
+                    const val = status.validation_statistics;
+                    document.getElementById('val-total').textContent = val.total_validations || 0;
+                    document.getElementById('val-success').textContent = val.successful_validations || 0;
+                    document.getElementById('val-failed').textContent = val.failed_validations || 0;
+                    const valFailed = document.getElementById('val-failed');
+                    if ((val.failed_validations || 0) > 0) {
+                        valFailed.classList.add('error');
+                    }
+                    document.getElementById('val-checksum').textContent = val.checksum_failures || 0;
+                }
+
+                // Source breakdown from detailed metrics
+                try {
+                    const metricsRes = await fetch('/scout/metrics');
+                    const metrics = await metricsRes.json();
+                    if (metrics.source_breakdown && metrics.source_breakdown.length > 0) {
+                        const sourceHtml = metrics.source_breakdown.slice(0, 10).map(src => `
+                            <tr>
+                                <td>${src.source_ip}</td>
+                                <td>${src.requests}</td>
+                                <td>${formatBytes(src.bytes)}</td>
+                                <td class="timestamp">${src.last_seen ? new Date(src.last_seen).toLocaleTimeString() : '-'}</td>
+                            </tr>
+                        `).join('');
+                        document.getElementById('source-table').innerHTML = sourceHtml ||
+                            '<tr><td colspan="4" style="color: #666;">No agents connected</td></tr>';
+                    }
+                } catch (e) {
+                    console.log('Could not fetch metrics:', e);
+                }
+
+                // Recent Data
                 const dataHtml = data.map(entry => `
                     <div class="data-entry success">
-                        <strong>${entry.timestamp}</strong> - ${entry.source_ip} (${entry.data_type})<br>
-                        Host: ${entry.host_id} | Records: ${entry.record_count} | Size: ${entry.data_size} bytes
+                        <strong>${entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '-'}</strong>
+                        - ${entry.source_ip} (${entry.data_type || 'unknown'})<br>
+                        <span style="color: #888;">Host: ${entry.host_id || '-'} |
+                        Records: ${entry.record_count || 1} |
+                        Size: ${formatBytes(entry.data_size)}</span>
                     </div>
-                `).join('') || '<p>No data received yet</p>';
-
+                `).join('') || '<p style="color: #666;">No data received yet</p>';
                 document.getElementById('recent-data').innerHTML = dataHtml;
 
             } catch (error) {
                 console.error('Refresh failed:', error);
+                document.getElementById('recv-status').textContent = 'ERROR';
+                document.getElementById('recv-status').className = 'status-badge failed';
             }
         }
 
-        setInterval(refreshData, 5000);
+        // Auto-refresh toggle
+        document.getElementById('auto-refresh').addEventListener('change', function() {
+            if (this.checked) {
+                refreshInterval = setInterval(refreshData, 5000);
+            } else {
+                clearInterval(refreshInterval);
+            }
+        });
+
+        // Initial load and start auto-refresh
         refreshData();
+        refreshInterval = setInterval(refreshData, 5000);
     </script>
 </body>
 </html>'''

@@ -735,16 +735,26 @@ def render(stdscr):
             attr = curses.A_NORMAL
         stdscr.addstr(7, 14, s, attr)
 
-        stdscr.addstr(8, 0, "PCAP:")
+        # Scout Receiver service status
+        recv_state = systemctl_is_active(RECEIVER_SERVICE)
+        s, c = badge_text(recv_state)
+        stdscr.addstr(8, 2, "  RECEIVER: ")
+        try:
+            attr = curses.color_pair(c) | (curses.A_BOLD if c == 2 else 0)
+        except Exception:
+            attr = curses.A_NORMAL
+        stdscr.addstr(8, 14, s, attr)
+
+        stdscr.addstr(10, 0, "PCAP:")
         # PCAP counts: make numeric values use the active/accent color for visibility
         try:
-            stdscr.addstr(9, 2, "  Ring        : ")
-            stdscr.addstr(9, 21, f"{buff_count:<5}", curses.color_pair(2) | curses.A_BOLD)
-            stdscr.addstr(10, 2, "  Backlog     : ")
-            stdscr.addstr(10, 21, f"{back_count:<5}", curses.color_pair(3) | curses.A_DIM)
+            stdscr.addstr(11, 2, "  Ring        : ")
+            stdscr.addstr(11, 21, f"{buff_count:<5}", curses.color_pair(2) | curses.A_BOLD)
+            stdscr.addstr(12, 2, "  Backlog     : ")
+            stdscr.addstr(12, 21, f"{back_count:<5}", curses.color_pair(3) | curses.A_DIM)
         except Exception:
-            stdscr.addstr(9, 2, f"  Ring        : {buff_count:<5}")
-            stdscr.addstr(10, 2, f"  Backlog     : {back_count:<5}")
+            stdscr.addstr(11, 2, f"  Ring        : {buff_count:<5}")
+            stdscr.addstr(12, 2, f"  Backlog     : {back_count:<5}")
 
         # Show drive status and destination
         if drive_present:
@@ -757,19 +767,19 @@ def render(stdscr):
                     break
             try:
                 # Drive connected: label in accent, value bold
-                stdscr.addstr(11, 2, "  Drive       : ", curses.color_pair(5))
-                stdscr.addstr(11, 17, "CONNECTED", curses.color_pair(2) | curses.A_BOLD)
-                stdscr.addstr(12, 2, "  Mount       : ")
-                stdscr.addstr(12, 16, f"{active_mount}", curses.color_pair(5))
-                stdscr.addstr(13, 2, "  On Drive    : ")
-                stdscr.addstr(13, 16, f"{drive_pcap_count} files", curses.color_pair(2))
+                stdscr.addstr(13, 2, "  Drive       : ", curses.color_pair(5))
+                stdscr.addstr(13, 17, "CONNECTED", curses.color_pair(2) | curses.A_BOLD)
+                stdscr.addstr(14, 2, "  Mount       : ")
+                stdscr.addstr(14, 16, f"{active_mount}", curses.color_pair(5))
+                stdscr.addstr(15, 2, "  On Drive    : ")
+                stdscr.addstr(15, 16, f"{drive_pcap_count} files", curses.color_pair(2))
             except Exception:
-                stdscr.addstr(11, 2, "  Drive       : CONNECTED")
-                stdscr.addstr(12, 2, f"  Mount       : {active_mount}")
-                stdscr.addstr(13, 2, f"  On Drive    : {drive_pcap_count} files")
+                stdscr.addstr(13, 2, "  Drive       : CONNECTED")
+                stdscr.addstr(14, 2, f"  Mount       : {active_mount}")
+                stdscr.addstr(15, 2, f"  On Drive    : {drive_pcap_count} files")
         else:
-            stdscr.addstr(11, 2, "  Drive       : ", curses.color_pair(3))
-            stdscr.addstr(11, 17, "not connected")
+            stdscr.addstr(13, 2, "  Drive       : ", curses.color_pair(3))
+            stdscr.addstr(13, 17, "not connected")
 
         # JSON stats: size in accent color
         try:
@@ -779,6 +789,32 @@ def render(stdscr):
         except Exception:
             stdscr.addstr(14, 0, "JSON:")
             stdscr.addstr(15, 2, f"  Captured    : {human_bytes(j_bytes):<12}")
+
+        # Scout Receiver stats
+        recv_stats = get_receiver_stats()
+        try:
+            stdscr.addstr(16, 0, "SCOUT:")
+            if recv_stats:
+                total_req = recv_stats.get('total_requests', 0)
+                success_rate = recv_stats.get('success_rate', 0)
+                data_mb = recv_stats.get('total_data_received_mb', 0)
+                sources = recv_stats.get('unique_sources', 0)
+                rpm = recv_stats.get('requests_per_minute', 0)
+                stdscr.addstr(17, 2, f"  Requests    : ")
+                stdscr.addstr(17, 18, f"{total_req}", curses.color_pair(2) | curses.A_BOLD)
+                stdscr.addstr(17, 26, f" ({success_rate}% ok)", curses.color_pair(5))
+                stdscr.addstr(18, 2, f"  Data        : ")
+                stdscr.addstr(18, 18, f"{data_mb} MB", curses.color_pair(2))
+                stdscr.addstr(18, 30, f" ({sources} src, {rpm}/min)", curses.color_pair(5))
+            else:
+                stdscr.addstr(17, 2, f"  Status      : ", curses.color_pair(3))
+                stdscr.addstr(17, 18, f"unavailable", curses.color_pair(1))
+        except Exception:
+            stdscr.addstr(16, 0, "SCOUT:")
+            if recv_stats:
+                stdscr.addstr(17, 2, f"  Requests    : {recv_stats.get('total_requests', 0)}")
+            else:
+                stdscr.addstr(17, 2, f"  Status      : unavailable")
 
         # Controls: make keys accent colored for quick scanning
         try:
@@ -802,29 +838,32 @@ def render(stdscr):
             stdscr.addstr(7, left_w + 22, "[h] ")
             stdscr.addstr(7, left_w + 26, "Hot", curses.color_pair(5))
 
-            stdscr.addstr(8, left_w + 2, "[s] ")
-            stdscr.addstr(8, left_w + 6, "Status", curses.color_pair(5))
-            stdscr.addstr(8, left_w + 16, "[+/-] ")
-            stdscr.addstr(8, left_w + 22, "Speed", curses.color_pair(5))
+            stdscr.addstr(8, left_w + 2, "[r] ")
+            stdscr.addstr(8, left_w + 6, "Recv", curses.color_pair(5))
+            stdscr.addstr(8, left_w + 12, "[s] ")
+            stdscr.addstr(8, left_w + 16, "Status", curses.color_pair(5))
 
-            stdscr.addstr(10, left_w + 2, "[?] ")
-            stdscr.addstr(10, left_w + 6, "Help", curses.color_pair(4) | curses.A_BOLD)
-            stdscr.addstr(10, left_w + 16, "[q] ")
-            stdscr.addstr(10, left_w + 20, "Quit", curses.color_pair(5))
+            stdscr.addstr(9, left_w + 2, "[+/-] ")
+            stdscr.addstr(9, left_w + 8, "Speed", curses.color_pair(5))
+
+            stdscr.addstr(11, left_w + 2, "[?] ")
+            stdscr.addstr(11, left_w + 6, "Help", curses.color_pair(4) | curses.A_BOLD)
+            stdscr.addstr(11, left_w + 16, "[q] ")
+            stdscr.addstr(11, left_w + 20, "Quit", curses.color_pair(5))
         except Exception:
             stdscr.addstr(3, left_w + 2, "[1] Stop   [3] Start")
             stdscr.addstr(4, left_w + 2, "[2] Mount/Unmount Drive")
             stdscr.addstr(5, left_w + 2, "[z] Zeek Start  [x] Stop")
-            stdscr.addstr(7, left_w + 2, "[c] Cap [m] Mov [h] Hot")
+            stdscr.addstr(7, left_w + 2, "[c] Cap [m] Mov [h] Hot [r] Recv")
             stdscr.addstr(8, left_w + 2, "[s] Status  [+/-] Speed")
-            stdscr.addstr(10, left_w + 2, "[?] Help    [q] Quit")
+            stdscr.addstr(11, left_w + 2, "[?] Help    [q] Quit")
 
-        divider(stdscr, 19, w)
+        divider(stdscr, 20, w)
         # Show status message if recent (within 5 seconds); otherwise show last input
         if status_message and (time.time() - status_message_time < 5):
-            draw_text(stdscr, 20, 0, w, f"Status: {status_message}")
+            draw_text(stdscr, 21, 0, w, f"Status: {status_message}")
         else:
-            draw_text(stdscr, 20, 0, w, f"Input: {last_key}")
+            draw_text(stdscr, 21, 0, w, f"Input: {last_key}")
         stdscr.refresh()
 
         t_end = time.time() + REFRESH
