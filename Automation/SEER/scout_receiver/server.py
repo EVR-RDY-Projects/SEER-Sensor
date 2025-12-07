@@ -100,6 +100,7 @@ class ScoutReceiverServer:
         router.add_get('/api/statistics', self._handle_api_statistics)
         router.add_get('/api/storage', self._handle_api_storage)
         router.add_get('/api/system', self._handle_api_system)
+        router.add_get('/api/analytics', self._handle_api_analytics)
         router.add_get('/ws', self._handle_websocket)
 
     def _setup_cors(self) -> None:
@@ -243,7 +244,9 @@ class ScoutReceiverServer:
                 processing_time=processing_time,
                 source_ip=client_ip,
                 record_count=record_count,
-                success=True
+                success=True,
+                data_type=data_type,
+                data=data
             )
 
             # Log successful data extraction
@@ -457,6 +460,10 @@ class ScoutReceiverServer:
         """Return system component statuses including services, PCAP, and drive info."""
         result = self._collect_system_status()
         return web.json_response(result)
+
+    async def _handle_api_analytics(self, request: Request) -> Response:
+        """Return event type analytics breakdown."""
+        return web.json_response(self.statistics.get_analytics())
 
     def _collect_system_status(self) -> Dict[str, Any]:
         """Collect system status (runs in thread pool)."""
@@ -805,6 +812,32 @@ class ScoutReceiverServer:
             </div>
         </div>
 
+        <!-- Event Analytics -->
+        <div class="grid" style="margin-bottom: 15px;">
+            <div class="card">
+                <h2>Data Types (X-Scout-Data-Type)</h2>
+                <div id="data-types-breakdown">Loading...</div>
+            </div>
+
+            <div class="card">
+                <h2>Event Schemas (ASIM)</h2>
+                <div id="event-schemas-breakdown">Loading...</div>
+            </div>
+
+            <div class="card">
+                <h2>Event Types (Granular)</h2>
+                <div id="event-types-breakdown">Loading...</div>
+            </div>
+
+            <div class="card">
+                <h2>Analytics Summary</h2>
+                <div class="stat"><span class="stat-label">Unique Data Types</span><span id="unique-data-types" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Unique Event Schemas</span><span id="unique-schemas" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Unique Event Types</span><span id="unique-event-types" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Total Records</span><span id="analytics-records" class="stat-value">-</span></div>
+            </div>
+        </div>
+
         <!-- Source Breakdown and Recent Data -->
         <div class="grid-2">
             <div class="card">
@@ -863,14 +896,27 @@ class ScoutReceiverServer:
             return { text: 'UNHEALTHY', class: 'failed' };
         }
 
+        function renderBreakdown(items, nameKey, countKey) {
+            if (!items || items.length === 0) {
+                return '<p style="color: #666; font-size: 0.85em;">No data yet</p>';
+            }
+            return items.slice(0, 8).map(item => `
+                <div class="stat">
+                    <span class="stat-label">${item[nameKey] || 'unknown'}</span>
+                    <span class="stat-value">${item[countKey] || 0}</span>
+                </div>
+            `).join('');
+        }
+
         async function refreshData() {
             try {
-                const [statsRes, dataRes, storageRes, statusRes, systemRes] = await Promise.all([
+                const [statsRes, dataRes, storageRes, statusRes, systemRes, analyticsRes] = await Promise.all([
                     fetch('/api/statistics'),
                     fetch('/api/data?limit=8'),
                     fetch('/api/storage'),
                     fetch('/scout/status'),
-                    fetch('/api/system')
+                    fetch('/api/system'),
+                    fetch('/api/analytics')
                 ]);
 
                 const stats = await statsRes.json();
@@ -878,6 +924,7 @@ class ScoutReceiverServer:
                 const storage = await storageRes.json();
                 const status = await statusRes.json();
                 const system = await systemRes.json();
+                const analytics = await analyticsRes.json();
 
                 // Update last refresh time
                 document.getElementById('last-update').textContent =
@@ -972,6 +1019,29 @@ class ScoutReceiverServer:
                         valFailed.classList.add('error');
                     }
                     document.getElementById('val-checksum').textContent = val.checksum_failures || 0;
+                }
+
+                // Event Analytics
+                if (analytics) {
+                    // Data Types breakdown
+                    document.getElementById('data-types-breakdown').innerHTML =
+                        renderBreakdown(analytics.data_types, 'type', 'count');
+
+                    // Event Schemas breakdown
+                    document.getElementById('event-schemas-breakdown').innerHTML =
+                        renderBreakdown(analytics.event_schemas, 'schema', 'count');
+
+                    // Event Types breakdown
+                    document.getElementById('event-types-breakdown').innerHTML =
+                        renderBreakdown(analytics.event_types, 'event_type', 'count');
+
+                    // Analytics summary
+                    if (analytics.totals) {
+                        document.getElementById('unique-data-types').textContent = analytics.totals.unique_data_types || 0;
+                        document.getElementById('unique-schemas').textContent = analytics.totals.unique_event_schemas || 0;
+                        document.getElementById('unique-event-types').textContent = analytics.totals.unique_event_types || 0;
+                        document.getElementById('analytics-records').textContent = analytics.totals.total_records || 0;
+                    }
                 }
 
                 // Source breakdown from detailed metrics
