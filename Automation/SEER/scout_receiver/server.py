@@ -8,9 +8,7 @@ provide heartbeat endpoints, and serve a monitoring dashboard.
 import asyncio
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
@@ -63,9 +61,6 @@ class ScoutReceiverServer:
         self.app = web.Application()
         self.is_running = False
         self.start_time: Optional[float] = None
-
-        # Thread pool for blocking I/O operations
-        self._executor = ThreadPoolExecutor(max_workers=4)
 
         # WebSocket connections for real-time updates
         self.websocket_connections: Set[web.WebSocketResponse] = set()
@@ -228,22 +223,17 @@ class ScoutReceiverServer:
                         record_count = len(data[key])
                         break
 
-            # Save to storage (run in thread pool to avoid blocking)
-            loop = asyncio.get_event_loop()
-            filepath = await loop.run_in_executor(
-                self._executor,
-                partial(
-                    self.storage.save_data,
-                    data=data,
-                    data_type=data_type,
-                    source_ip=client_ip,
-                    host_id=host_id,
-                    metadata={
-                        'agent_version': agent_version,
-                        'checksum': checksum,
-                        'validation': validation_result.to_dict(),
-                    }
-                )
+            # Save to storage
+            filepath = self.storage.save_data(
+                data=data,
+                data_type=data_type,
+                source_ip=client_ip,
+                host_id=host_id,
+                metadata={
+                    'agent_version': agent_version,
+                    'checksum': checksum,
+                    'validation': validation_result.to_dict(),
+                }
             )
 
             # Update statistics
@@ -461,16 +451,11 @@ class ScoutReceiverServer:
 
     async def _handle_api_storage(self, request: Request) -> Response:
         """Return storage statistics."""
-        # Run in thread pool to avoid blocking on file system operations
-        loop = asyncio.get_event_loop()
-        stats = await loop.run_in_executor(self._executor, self.storage.get_storage_stats)
-        return web.json_response(stats)
+        return web.json_response(self.storage.get_storage_stats())
 
     async def _handle_api_system(self, request: Request) -> Response:
         """Return system component statuses including services, PCAP, and drive info."""
-        # Run all blocking operations in thread pool
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(self._executor, self._collect_system_status)
+        result = self._collect_system_status()
         return web.json_response(result)
 
     def _collect_system_status(self) -> Dict[str, Any]:
@@ -1084,9 +1069,6 @@ class ScoutReceiverServer:
         # Close WebSocket connections
         for ws in self.websocket_connections.copy():
             await ws.close()
-
-        # Shutdown thread pool executor
-        self._executor.shutdown(wait=False)
 
         logger.info("Scout Receiver stopped")
 

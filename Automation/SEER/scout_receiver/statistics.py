@@ -8,7 +8,6 @@ and server performance.
 import time
 from collections import defaultdict
 from datetime import datetime
-from threading import Lock
 from typing import Any, Dict, List, Optional
 
 from .utils.logging import get_logger
@@ -16,12 +15,21 @@ from .utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+class DummyLock:
+    """No-op lock for single-threaded async context."""
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        pass
+
+
 class StatisticsCollector:
     """Collects and manages server statistics and metrics."""
 
     def __init__(self):
         """Initialize statistics collector."""
-        self._lock = Lock()
+        # Use dummy lock since we're in single-threaded async context
+        self._lock = DummyLock()
 
         # Request statistics
         self.total_requests = 0
