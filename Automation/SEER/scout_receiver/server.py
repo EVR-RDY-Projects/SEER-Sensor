@@ -177,13 +177,42 @@ class ScoutReceiverServer:
 
             # Read and parse request body
             if 'application/json' in content_type:
-                data = await request.json()
+                # Try standard JSON first, fall back to NDJSON if it fails
+                text = await request.text()
+                try:
+                    data = json.loads(text)
+                except json.JSONDecodeError:
+                    # Likely NDJSON format sent with wrong content-type, or has trailing newline
+                    lines = [line for line in text.strip().split('\n') if line.strip()]
+                    if len(lines) == 1:
+                        data = json.loads(lines[0])
+                    else:
+                        data = [json.loads(line) for line in lines]
             elif 'application/x-ndjson' in content_type:
                 text = await request.text()
-                data = [json.loads(line) for line in text.strip().split('\n') if line]
+                lines = [line for line in text.strip().split('\n') if line.strip()]
+                if len(lines) == 1:
+                    data = json.loads(lines[0])
+                else:
+                    data = [json.loads(line) for line in lines]
             else:
-                data = await request.read()
-                data = data.decode('utf-8', errors='replace')
+                # Try to auto-detect format
+                raw_data = await request.read()
+                text = raw_data.decode('utf-8', errors='replace')
+                try:
+                    data = json.loads(text)
+                except json.JSONDecodeError:
+                    lines = [line for line in text.strip().split('\n') if line.strip()]
+                    if len(lines) >= 1:
+                        try:
+                            if len(lines) == 1:
+                                data = json.loads(lines[0])
+                            else:
+                                data = [json.loads(line) for line in lines]
+                        except json.JSONDecodeError:
+                            data = text
+                    else:
+                        data = text
 
             # Log packet reception
             packet_logger.log_packet_received(
