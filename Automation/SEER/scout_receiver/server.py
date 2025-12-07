@@ -199,12 +199,10 @@ class ScoutReceiverServer:
             validation_result = self.validator.validate_data_envelope(envelope)
 
             # Verify checksum if provided
+            # NOTE: Checksum must be calculated on the raw request body (text),
+            # not on re-serialized JSON, to match what the SCOUT Agent sends
             if checksum and self.config.get('validation.verify_checksums', True):
-                if isinstance(data, (dict, list)):
-                    data_str = json.dumps(data, sort_keys=True)
-                else:
-                    data_str = str(data)
-                checksum_result = self.validator.validate_checksum(data_str, checksum)
+                checksum_result = self.validator.validate_checksum(text, checksum)
                 if not checksum_result.is_valid:
                     logger.warning(f"Checksum mismatch from {client_ip}: {checksum_result.message}")
 
