@@ -131,15 +131,18 @@ if [[ -d "$REPO_ROOT/Automation/SEER/scout_receiver" ]]; then
   sudo chown -R seer:seer /opt/seer/Automation 2>/dev/null || true
 
   # Create virtualenv if it doesn't exist or is broken, and install dependencies
-  if [[ ! -x /opt/seer/venv/bin/python ]]; then
-    echo "Creating Python virtualenv at /opt/seer/venv..."
-    sudo rm -rf /opt/seer/venv 2>/dev/null || true
+  # Always recreate venv to ensure clean state
+  echo "Creating Python virtualenv at /opt/seer/venv..."
+  sudo rm -rf /opt/seer/venv 2>/dev/null || true
+  if ! sudo python3 -m venv /opt/seer/venv; then
+    echo "ERROR: Failed to create virtualenv. Ensure python3-venv is installed." >&2
+    echo "Trying: sudo apt-get install -y python3-venv" >&2
+    sudo -E apt-get install -y python3-venv
     if ! sudo python3 -m venv /opt/seer/venv; then
-      echo "ERROR: Failed to create virtualenv. Ensure python3-venv is installed." >&2
-      echo "Trying: sudo apt-get install -y python3-venv" >&2
-      sudo -E apt-get install -y python3-venv
-      sudo python3 -m venv /opt/seer/venv
+      echo "ERROR: Still cannot create venv. Will use system Python." >&2
     fi
+  fi
+  if [[ -d /opt/seer/venv ]]; then
     sudo chown -R seer:seer /opt/seer/venv
   fi
 
@@ -153,8 +156,13 @@ if [[ -d "$REPO_ROOT/Automation/SEER/scout_receiver" ]]; then
       echo "  Using virtualenv pip..."
       sudo /opt/seer/venv/bin/pip install --upgrade pip -q 2>/dev/null || true
       if sudo /opt/seer/venv/bin/pip install -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt"; then
-        DEPS_INSTALLED=1
-        echo "  Scout Receiver dependencies installed in virtualenv."
+        # Verify it actually worked in the venv
+        if /opt/seer/venv/bin/python -c "import aiohttp" 2>/dev/null; then
+          DEPS_INSTALLED=1
+          echo "  Scout Receiver dependencies installed in virtualenv."
+        else
+          echo "  WARNING: pip reported success but aiohttp not importable in venv"
+        fi
       fi
     fi
 
@@ -168,12 +176,14 @@ if [[ -d "$REPO_ROOT/Automation/SEER/scout_receiver" ]]; then
       fi
     fi
 
-    # Verify aiohttp is importable
-    if python3 -c "import aiohttp" 2>/dev/null || /opt/seer/venv/bin/python -c "import aiohttp" 2>/dev/null; then
-      echo "  Verified: aiohttp is available."
+    # Final verification
+    if /opt/seer/venv/bin/python -c "import aiohttp" 2>/dev/null; then
+      echo "  Verified: aiohttp is available in venv."
+    elif python3 -c "import aiohttp" 2>/dev/null; then
+      echo "  Verified: aiohttp is available in system Python."
     else
       echo "ERROR: aiohttp not importable after install. Scout Receiver will not work." >&2
-      echo "  Try manually: sudo pip3 install aiohttp aiohttp-cors pyyaml jsonschema" >&2
+      echo "  Try manually: sudo /opt/seer/venv/bin/pip install aiohttp aiohttp-cors pyyaml jsonschema" >&2
     fi
   fi
 
