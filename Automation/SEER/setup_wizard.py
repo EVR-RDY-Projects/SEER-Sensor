@@ -41,6 +41,45 @@ DEFAULTS = {
     },
     # How long (seconds) to wait for link at boot before starting capture
     "wait_link_timeout": 60,
+    # Scout Receiver configuration (HTTP server for SCOUT Agent data)
+    "scout_receiver": {
+        "enabled": True,
+        "server": {
+            "host": "0.0.0.0",
+            "port": 8080,
+            "cors_enabled": True,
+            "max_request_size_mb": 50,
+        },
+        "storage": {
+            "data_dir": "/var/seer/scout_data",
+            "max_file_size_mb": 100,
+            "rotate_files": True,
+            "retention_days": 30,
+            "organize_by_date": True,
+        },
+        "validation": {
+            "enforce_schema": True,
+            "verify_checksums": True,
+            "max_data_size_mb": 50,
+            "strict_mode": False,
+        },
+        "heartbeat": {
+            "enabled": True,
+            "interval_seconds": 30,
+            "response_delay_ms": 0,
+        },
+        "logging": {
+            "level": "INFO",
+            "format": "structured",
+            "file": "/var/log/seer/scout_receiver.log",
+            "max_size_mb": 50,
+            "backup_count": 5,
+        },
+        "web_interface": {
+            "enabled": True,
+            "static_path": "/opt/seer/www/scout_dashboard",
+        },
+    },
 }
 
 YAML_PATH = Path("/opt/seer/etc/seer.yml")
@@ -51,7 +90,9 @@ REQUIRED_DIRS = [
     "/opt/seer/var/backlog",
     "/var/seer/pcap_ring",
     "/var/seer/json_spool",
+    "/var/seer/scout_data",
     "/var/log/seer",
+    "/opt/seer/www/scout_dashboard",
 ]
 
 
@@ -91,6 +132,20 @@ def prompt_float(label: str, default: float, lo: float | None = None, hi: float 
             return n
         except ValueError:
             print("  Enter a number.")
+
+
+def prompt_bool(label: str, default: bool) -> bool:
+    """Prompt for a yes/no boolean value."""
+    default_str = "Y/n" if default else "y/N"
+    while True:
+        s = input(f"{label} [{default_str}]: ").strip().lower()
+        if not s:
+            return default
+        if s in ("y", "yes", "true", "1"):
+            return True
+        if s in ("n", "no", "false", "0"):
+            return False
+        print("  Enter y/yes or n/no.")
 
 
 def iface_exists(name: str) -> bool:
@@ -285,6 +340,45 @@ def main(non_interactive: bool = False) -> None:
         soft = hard - 1
     cfg["capture"]["disk_soft_pct"] = soft
     cfg["capture"]["disk_hard_pct"] = hard
+
+    # Scout Receiver configuration (HTTP server for SCOUT Agent data)
+    print("\n== Scout Receiver Configuration ==")
+    print("The Scout Receiver accepts data from SCOUT Agents running on Windows endpoints.")
+
+    cfg["scout_receiver"]["enabled"] = prompt_bool(
+        "Enable Scout Receiver",
+        cfg["scout_receiver"]["enabled"]
+    )
+
+    if cfg["scout_receiver"]["enabled"]:
+        cfg["scout_receiver"]["server"]["host"] = prompt_str(
+            "Scout Receiver listen address (0.0.0.0 for all interfaces)",
+            cfg["scout_receiver"]["server"]["host"]
+        )
+        cfg["scout_receiver"]["server"]["port"] = prompt_int(
+            "Scout Receiver HTTP port",
+            cfg["scout_receiver"]["server"]["port"],
+            1024,
+            65535
+        )
+        cfg["scout_receiver"]["storage"]["data_dir"] = prompt_str(
+            "Scout data storage directory",
+            cfg["scout_receiver"]["storage"]["data_dir"]
+        )
+        cfg["scout_receiver"]["storage"]["retention_days"] = prompt_int(
+            "Data retention (days)",
+            cfg["scout_receiver"]["storage"]["retention_days"],
+            1,
+            365
+        )
+        cfg["scout_receiver"]["validation"]["verify_checksums"] = prompt_bool(
+            "Verify data checksums",
+            cfg["scout_receiver"]["validation"]["verify_checksums"]
+        )
+        cfg["scout_receiver"]["logging"]["level"] = prompt_str(
+            "Log level (DEBUG/INFO/WARNING/ERROR)",
+            cfg["scout_receiver"]["logging"]["level"]
+        ).upper()
 
     # Do work
     ensure_seer_user()

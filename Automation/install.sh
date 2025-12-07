@@ -30,6 +30,15 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Create /opt/seer/etc directory and copy example config if no config exists
+sudo mkdir -p /opt/seer/etc
+if [[ ! -f /opt/seer/etc/seer.yml ]]; then
+  if [[ -f "$REPO_ROOT/Automation/etc/seer.yml.example" ]]; then
+    echo "Installing example configuration to /opt/seer/etc/seer.yml"
+    sudo install -m 0644 "$REPO_ROOT/Automation/etc/seer.yml.example" /opt/seer/etc/seer.yml
+  fi
+fi
+
 # install wrapper (standardize to /usr/local/bin)
 echo "Installing /usr/local/bin/seer-capture.sh"
 sudo install -m 0755 "$REPO_ROOT/Automation/bin/seer-capture.sh" /usr/local/bin/seer-capture.sh
@@ -90,6 +99,41 @@ fi
 if [[ -f "$REPO_ROOT/Automation/systemd/seer-hotswap.service" ]]; then
   echo "Installing seer-hotswap.service"
   sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-hotswap.service" /etc/systemd/system/seer-hotswap.service
+fi
+
+# Install Scout Receiver (HTTP server for SCOUT Agent data)
+if [[ -d "$REPO_ROOT/Automation/SEER/scout_receiver" ]]; then
+  echo "Installing Scout Receiver module..."
+
+  # Create directories for Scout Receiver
+  sudo mkdir -p /var/seer/scout_data
+  sudo mkdir -p /opt/seer/Automation/SEER/scout_receiver
+
+  # Copy scout_receiver module to /opt/seer
+  sudo cp -r "$REPO_ROOT/Automation/SEER/scout_receiver"/* /opt/seer/Automation/SEER/scout_receiver/
+
+  # Set ownership
+  sudo chown -R seer:seer /var/seer/scout_data 2>/dev/null || true
+  sudo chown -R seer:seer /opt/seer/Automation/SEER/scout_receiver 2>/dev/null || true
+
+  # Install Python dependencies for Scout Receiver
+  if [[ -f "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" ]]; then
+    echo "Installing Scout Receiver Python dependencies..."
+    if [[ -d /opt/seer/venv ]]; then
+      sudo /opt/seer/venv/bin/pip install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || {
+        echo "WARNING: Failed to install Scout Receiver dependencies via venv; trying system pip" >&2
+        sudo pip3 install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || true
+      }
+    else
+      sudo pip3 install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || true
+    fi
+  fi
+
+  # Install Scout Receiver systemd service
+  if [[ -f "$REPO_ROOT/Automation/systemd/seer-scout-receiver.service" ]]; then
+    echo "Installing seer-scout-receiver.service"
+    sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-scout-receiver.service" /etc/systemd/system/seer-scout-receiver.service
+  fi
 fi
 
 # Ensure log/state directory exists with correct ownership
@@ -219,6 +263,12 @@ fi
 if [[ -f /etc/systemd/system/seer-hotswap.service ]]; then
   echo "Enabling and starting seer-hotswap.service"
   sudo systemctl enable --now seer-hotswap.service || true
+fi
+
+# Enable and start Scout Receiver if the unit was installed
+if [[ -f /etc/systemd/system/seer-scout-receiver.service ]]; then
+  echo "Enabling and starting seer-scout-receiver.service"
+  sudo systemctl enable --now seer-scout-receiver.service || true
 fi
 
 echo "Verification: listing units and recent journal entries"
