@@ -145,6 +145,81 @@ else
   logs_ok=1
 fi
 
+# Check Scout Receiver if enabled in config
+scout_receiver_enabled=$(python3 - <<'PY'
+import yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    sr = cfg.get('scout_receiver', {}) or {}
+    print('true' if sr.get('enabled', False) else 'false')
+except Exception:
+    print('false')
+PY
+)
+
+scout_receiver_ok=1
+if [[ "$scout_receiver_enabled" == "true" ]]; then
+  echo "Verifier: Scout Receiver is enabled in config"
+
+  # Check if service is active
+  if systemctl is-active --quiet seer-scout-receiver.service; then
+    echo "OK: seer-scout-receiver is active"
+  else
+    echo "FAIL: seer-scout-receiver not active"
+    scout_receiver_ok=0
+    # Show recent logs for debugging
+    echo "  Recent logs:"
+    journalctl -u seer-scout-receiver.service -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || true
+  fi
+
+  # Check if Python dependencies are available
+  if /opt/seer/venv/bin/python -c "import aiohttp" 2>/dev/null || python3 -c "import aiohttp" 2>/dev/null; then
+    echo "OK: aiohttp module is available"
+  else
+    echo "FAIL: aiohttp module not found - Scout Receiver dependencies not installed"
+    scout_receiver_ok=0
+  fi
+
+  # Check if HTTP endpoint responds (if service is running)
+  if [[ $scout_receiver_ok -eq 1 ]]; then
+    scout_port=$(python3 - <<'PY'
+import yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    sr = cfg.get('scout_receiver', {}) or {}
+    print(sr.get('server', {}).get('port', 8080))
+except Exception:
+    print('8080')
+PY
+    )
+    if curl -s --max-time 5 "http://127.0.0.1:${scout_port}/scout/health" >/dev/null 2>&1; then
+      echo "OK: Scout Receiver HTTP endpoint responding on port ${scout_port}"
+    else
+      echo "WARN: Scout Receiver HTTP endpoint not responding yet (may still be starting)"
+    fi
+  fi
+
+  # Check if data directory exists and is writable
+  scout_data_dir=$(python3 - <<'PY'
+import yaml
+try:
+    cfg=yaml.safe_load(open('/opt/seer/etc/seer.yml')) or {}
+    sr = cfg.get('scout_receiver', {}) or {}
+    print(sr.get('storage', {}).get('data_dir', '/var/seer/scout_data'))
+except Exception:
+    print('/var/seer/scout_data')
+PY
+  )
+  if [[ -d "$scout_data_dir" ]]; then
+    echo "OK: Scout data directory exists: $scout_data_dir"
+  else
+    echo "FAIL: Scout data directory missing: $scout_data_dir"
+    scout_receiver_ok=0
+  fi
+else
+  echo "Verifier: Scout Receiver is disabled in config (skipping)"
+fi
+
 # Cleanup: remove any verifier-created dummy pcaps from ring, dest, backlog, and export drive if mounted
 # We identify dummies by the filename prefix 'SEER-DUMMY-'
 cleanup_dummy() {
@@ -174,10 +249,15 @@ PY
 
 cleanup_dummy
 
-if [[ ${moved} -eq 1 && ${capture_ok} -eq 1 && ${zeek_ok} -eq 1 && ${logs_ok} -eq 1 ]]; then
+if [[ ${moved} -eq 1 && ${capture_ok} -eq 1 && ${zeek_ok} -eq 1 && ${logs_ok} -eq 1 && ${scout_receiver_ok} -eq 1 ]]; then
   echo "Verification PASSED"
   exit 0
 else
   echo "Verification FAILED"
+  [[ ${moved} -eq 0 ]] && echo "  - Mover check failed"
+  [[ ${capture_ok} -eq 0 ]] && echo "  - Capture service check failed"
+  [[ ${zeek_ok} -eq 0 ]] && echo "  - Zeek service check failed"
+  [[ ${logs_ok} -eq 0 ]] && echo "  - Zeek logs check failed"
+  [[ ${scout_receiver_ok} -eq 0 ]] && echo "  - Scout Receiver check failed"
   exit 3
 fi

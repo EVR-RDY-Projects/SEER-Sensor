@@ -15,14 +15,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 # deps we expect
-if ! dpkg -s python3-yaml >/dev/null 2>&1; then
-  echo "Installing python3-yaml..."
-  sudo -E apt-get update -qq || true
-  sudo -E apt-get install -y -qq python3-yaml
-fi
+APT_UPDATED=0
+for pkg in python3-yaml python3-venv python3-pip; do
+  if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    if [[ $APT_UPDATED -eq 0 ]]; then
+      echo "Updating apt cache..."
+      sudo -E apt-get update -qq || true
+      APT_UPDATED=1
+    fi
+    echo "Installing $pkg..."
+    sudo -E apt-get install -y -qq "$pkg"
+  fi
+done
 if ! command -v tcpdump >/dev/null 2>&1; then
+  if [[ $APT_UPDATED -eq 0 ]]; then
+    sudo -E apt-get update -qq || true
+  fi
   echo "Installing tcpdump..."
-  sudo -E apt-get update -qq || true
   sudo -E apt-get install -y -qq tcpdump
 fi
 
@@ -121,21 +130,51 @@ if [[ -d "$REPO_ROOT/Automation/SEER/scout_receiver" ]]; then
   sudo chown -R seer:seer /var/seer/scout_data 2>/dev/null || true
   sudo chown -R seer:seer /opt/seer/Automation 2>/dev/null || true
 
-  # Create virtualenv if it doesn't exist and install dependencies
-  if [[ ! -d /opt/seer/venv ]]; then
+  # Create virtualenv if it doesn't exist or is broken, and install dependencies
+  if [[ ! -x /opt/seer/venv/bin/python ]]; then
     echo "Creating Python virtualenv at /opt/seer/venv..."
-    sudo python3 -m venv /opt/seer/venv
+    sudo rm -rf /opt/seer/venv 2>/dev/null || true
+    if ! sudo python3 -m venv /opt/seer/venv; then
+      echo "ERROR: Failed to create virtualenv. Ensure python3-venv is installed." >&2
+      echo "Trying: sudo apt-get install -y python3-venv" >&2
+      sudo -E apt-get install -y python3-venv
+      sudo python3 -m venv /opt/seer/venv
+    fi
     sudo chown -R seer:seer /opt/seer/venv
   fi
 
   # Install Python dependencies for Scout Receiver
   if [[ -f "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" ]]; then
     echo "Installing Scout Receiver Python dependencies..."
-    sudo /opt/seer/venv/bin/pip install --upgrade pip -q || true
-    sudo /opt/seer/venv/bin/pip install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || {
-      echo "WARNING: Failed to install Scout Receiver dependencies via venv; trying system pip" >&2
-      sudo pip3 install -q -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" || true
-    }
+    DEPS_INSTALLED=0
+
+    # Try venv pip first
+    if [[ -x /opt/seer/venv/bin/pip ]]; then
+      echo "  Using virtualenv pip..."
+      sudo /opt/seer/venv/bin/pip install --upgrade pip -q 2>/dev/null || true
+      if sudo /opt/seer/venv/bin/pip install -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt"; then
+        DEPS_INSTALLED=1
+        echo "  Scout Receiver dependencies installed in virtualenv."
+      fi
+    fi
+
+    # Fallback to system pip if venv failed
+    if [[ $DEPS_INSTALLED -eq 0 ]]; then
+      echo "  Falling back to system pip..."
+      if sudo pip3 install --break-system-packages -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" 2>/dev/null; then
+        DEPS_INSTALLED=1
+      elif sudo pip3 install -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" 2>/dev/null; then
+        DEPS_INSTALLED=1
+      fi
+    fi
+
+    # Verify aiohttp is importable
+    if python3 -c "import aiohttp" 2>/dev/null || /opt/seer/venv/bin/python -c "import aiohttp" 2>/dev/null; then
+      echo "  Verified: aiohttp is available."
+    else
+      echo "ERROR: aiohttp not importable after install. Scout Receiver will not work." >&2
+      echo "  Try manually: sudo pip3 install aiohttp aiohttp-cors pyyaml jsonschema" >&2
+    fi
   fi
 
   # Install Scout Receiver systemd service
