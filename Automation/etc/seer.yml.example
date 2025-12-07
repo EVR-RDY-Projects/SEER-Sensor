@@ -1,0 +1,106 @@
+# SEER Sensor Configuration
+# Copy this file to /opt/seer/etc/seer.yml and customize as needed
+
+# Network interface for packet capture
+interface: enp2s0
+
+# Directory paths
+ring_dir: /var/seer/pcap_ring
+json_spool: /var/seer/json_spool
+dest_dir: /opt/seer/var/queue
+backlog_dir: /opt/seer/var/backlog
+
+# PCAP Capture Settings
+capture:
+  rotate_seconds: 20
+  max_files: 100
+  snaplen: 65535
+
+# External Drive Export
+export:
+  mount_candidates:
+    - /mnt/seer_external
+    - /mnt/SEER_EXT
+    - /media/seer_external
+  min_free_pct: 2
+  poll_interval: 2
+
+# Zeek Analysis (optional)
+zeek:
+  enabled: true
+  log_format: json
+  scripts:
+    - /opt/zeek/share/zeek/site/local.zeek
+
+# =============================================================================
+# Scout Receiver Configuration
+# =============================================================================
+# HTTP server for receiving SCOUT Agent data from Windows endpoints
+
+scout_receiver:
+  # Enable/disable the Scout Receiver service
+  enabled: true
+
+  # HTTP Server Settings
+  server:
+    # Listen address (0.0.0.0 for all interfaces, 127.0.0.1 for localhost only)
+    host: 0.0.0.0
+    # HTTP port (ensure no conflict with other services)
+    port: 8080
+    # Enable CORS for web dashboard access from other origins
+    cors_enabled: true
+    # Maximum request size in MB
+    max_request_size_mb: 50
+
+  # Data Storage Settings
+  storage:
+    # Directory for storing received data
+    data_dir: /var/seer/scout_data
+    # Maximum file size before rotation (MB)
+    max_file_size_mb: 100
+    # Enable automatic file rotation
+    rotate_files: true
+    # Days to retain data before cleanup
+    retention_days: 30
+    # Organize files by date (creates YYYYMMDD subdirectories)
+    organize_by_date: true
+
+  # Data Validation Settings
+  validation:
+    # Enforce JSON schema validation on incoming data
+    enforce_schema: true
+    # Verify checksums when X-Scout-Checksum header is present
+    verify_checksums: true
+    # Maximum data payload size in MB
+    max_data_size_mb: 50
+    # Strict mode rejects data with unknown fields
+    strict_mode: false
+
+  # Heartbeat/Health Check Settings
+  heartbeat:
+    # Enable heartbeat endpoint
+    enabled: true
+    # Expected heartbeat interval from agents (for monitoring)
+    interval_seconds: 30
+    # Artificial response delay for testing (0 = no delay)
+    response_delay_ms: 0
+
+  # Logging Settings
+  logging:
+    # Log level: DEBUG, INFO, WARNING, ERROR
+    level: INFO
+    # Log format: structured (JSON-like) or plain
+    format: structured
+    # Log file path
+    file: /var/log/seer/scout_receiver.log
+    # Maximum log file size in MB before rotation
+    max_size_mb: 50
+    # Number of backup log files to keep
+    backup_count: 5
+
+  # Web Interface Settings
+  web_interface:
+    # Enable web dashboard at http://host:port/
+    enabled: true
+    # Path for static assets (optional)
+    static_path: /opt/seer/www/scout_dashboard

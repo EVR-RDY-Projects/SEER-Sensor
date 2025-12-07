@@ -1,0 +1,14 @@
+# Scout Receiver Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# HTTP Server
+aiohttp>=3.8.0
+
+# CORS support for web dashboard
+aiohttp-cors>=0.7.0
+
+# Configuration
+pyyaml>=6.0.0
+
+# Validation (optional but recommended)
+jsonschema>=4.0.0

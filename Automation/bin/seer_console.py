@@ -27,6 +27,8 @@ SHIPPER_SERVICE = os.environ.get("SHIPPER_SERVICE", "seer-shipper.service")
 AGENT_SERVICE = os.environ.get("AGENT_SERVICE", "seer-agent.service")
 HOTSWAP_SERVICE = os.environ.get("HOTSWAP_SERVICE", "seer-hotswap.service")
 HOTSWAP_STATE = os.environ.get("HOTSWAP_STATE", "/var/log/seer/hotswap_state.json")
+RECEIVER_SERVICE = os.environ.get("RECEIVER_SERVICE", "seer-scout-receiver.service")
+RECEIVER_PORT = int(os.environ.get("RECEIVER_PORT", "8080"))
 
 # CLI / env flags
 parser = argparse.ArgumentParser(add_help=False)
@@ -98,6 +100,17 @@ def read_hotswap_state():
             return json.load(f)
     except Exception:
         return {}
+
+
+def get_receiver_stats():
+    """Fetch Scout Receiver statistics from HTTP endpoint."""
+    try:
+        import urllib.request
+        url = f'http://localhost:{RECEIVER_PORT}/api/statistics'
+        with urllib.request.urlopen(url, timeout=2) as r:
+            return json.load(r)
+    except Exception:
+        return None
 
 
 def json_stats(path):
@@ -385,6 +398,7 @@ def collect_status():
     mov_state = systemctl_is_active(MOVER_SERVICE)
     tim_state = systemctl_is_active(MOVER_TIMER) if MOVER_TIMER else "n/a"
     hot_state = systemctl_is_active(HOTSWAP_SERVICE)
+    recv_state = systemctl_is_active(RECEIVER_SERVICE)
 
     # Prefer interface from YAML; fall back to env IFACE or enp2s0
     iface = None
@@ -413,12 +427,16 @@ def collect_status():
     last_export = hs_state.get("last_export_ts", None)
     total_exported = hs_state.get("total_exported", 0)
 
+    # Get Scout Receiver stats
+    recv_stats = get_receiver_stats()
+
     return {
         "cap_state": cap_state,
         "mov_state": mov_state,
         "tim_state": tim_state,
         "zeek_state": zeek_state,
         "hot_state": hot_state,
+        "recv_state": recv_state,
         "ring_dir": ring_dir,
         "dest_dir": dest_dir,
         "backlog_dir": backlog_dir,
@@ -426,7 +444,12 @@ def collect_status():
         "dest_count": dest_count,
         "back_count": back_count,
         "json": {"count": j_count, "bytes": j_bytes, "last": j_last},
-        "export": {"drive_present": drive_present, "last_export_ts": last_export, "total_exported": total_exported},
+        "export": {
+            "drive_present": drive_present,
+            "last_export_ts": last_export,
+            "total_exported": total_exported,
+        },
+        "receiver": recv_stats,
     }
 
 
@@ -452,6 +475,7 @@ def show_help(stdscr):
         "  [c] Capture Logs",
         "  [m] Mover Logs",
         "  [h] Hotswap Logs",
+        "  [r] Receiver Logs",
         "  [s] Service Status",
         "",
         "DISPLAY:",
@@ -848,6 +872,11 @@ def render(stdscr):
                 curses.endwin()
                 os.system(f"journalctl -u {shlex.quote(HOTSWAP_SERVICE)} -n 400 --no-pager | less -SRX")
                 curses.reset_prog_mode()
+            elif ch in (ord("r"), ord("R")):
+                curses.def_prog_mode()
+                curses.endwin()
+                os.system(f"journalctl -u {shlex.quote(RECEIVER_SERVICE)} -n 400 --no-pager | less -SRX")
+                curses.reset_prog_mode()
             elif ch in (ord("s"), ord("S")):
                 curses.def_prog_mode()
                 curses.endwin()
@@ -900,6 +929,7 @@ def main():
             f"   TIMER: {s['tim_state']}   ZEEK: {s['zeek_state']}"
             f"   HOTSWAP: {s['hot_state']}"
         )
+        print(f"  RECEIVER: {s['recv_state']}")
         print(f"  RING    : {s['ring_dir']}  count={s['buff_count']}")
         print(f"  BACKLOG : {s['backlog_dir']}  count={s['back_count']}")
 
@@ -925,6 +955,14 @@ def main():
 
         j = s["json"]
         print(f"  JSON captured: {human_bytes(j['bytes'])}")
+
+        # Show Scout Receiver stats
+        recv = s.get("receiver")
+        if recv:
+            print(f"  SCOUT RECEIVER:")
+            print(f"    Requests  : {recv.get('total_requests', 0)} total, {recv.get('success_rate', 0)}% success")
+            print(f"    Data      : {recv.get('total_data_received_mb', 0)} MB received")
+            print(f"    Sources   : {recv.get('unique_sources', 0)} unique")
         return
 
     # Interactive TUI requires a TTY.
