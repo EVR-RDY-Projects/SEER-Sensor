@@ -176,43 +176,8 @@ class ScoutReceiverServer:
             checksum = request.headers.get('X-Scout-Checksum', '')
 
             # Read and parse request body
-            if 'application/json' in content_type:
-                # Try standard JSON first, fall back to NDJSON if it fails
-                text = await request.text()
-                try:
-                    data = json.loads(text)
-                except json.JSONDecodeError:
-                    # Likely NDJSON format sent with wrong content-type, or has trailing newline
-                    lines = [line for line in text.strip().split('\n') if line.strip()]
-                    if len(lines) == 1:
-                        data = json.loads(lines[0])
-                    else:
-                        data = [json.loads(line) for line in lines]
-            elif 'application/x-ndjson' in content_type:
-                text = await request.text()
-                lines = [line for line in text.strip().split('\n') if line.strip()]
-                if len(lines) == 1:
-                    data = json.loads(lines[0])
-                else:
-                    data = [json.loads(line) for line in lines]
-            else:
-                # Try to auto-detect format
-                raw_data = await request.read()
-                text = raw_data.decode('utf-8', errors='replace')
-                try:
-                    data = json.loads(text)
-                except json.JSONDecodeError:
-                    lines = [line for line in text.strip().split('\n') if line.strip()]
-                    if len(lines) >= 1:
-                        try:
-                            if len(lines) == 1:
-                                data = json.loads(lines[0])
-                            else:
-                                data = [json.loads(line) for line in lines]
-                        except json.JSONDecodeError:
-                            data = text
-                    else:
-                        data = text
+            text = await request.text()
+            data = self._parse_flexible_json(text)
 
             # Log packet reception
             packet_logger.log_packet_received(
@@ -660,6 +625,88 @@ class ScoutReceiverServer:
         return ws
 
     # ==================== Helper Methods ====================
+
+    def _parse_flexible_json(self, text: str) -> Any:
+        """Parse JSON data flexibly, handling various formats.
+
+        Supports:
+        - Standard JSON objects/arrays
+        - NDJSON (newline-delimited JSON)
+        - JSON with trailing newlines
+        - Concatenated JSON objects (}{)
+
+        Args:
+            text: Raw text data to parse
+
+        Returns:
+            Parsed JSON data (dict, list, or raw text if unparseable)
+        """
+        if not text or not text.strip():
+            return {}
+
+        text = text.strip()
+
+        # Try standard JSON first
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try splitting by newlines (NDJSON format)
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        if len(lines) > 1:
+            try:
+                return [json.loads(line) for line in lines]
+            except json.JSONDecodeError:
+                pass
+        elif len(lines) == 1:
+            try:
+                return json.loads(lines[0])
+            except json.JSONDecodeError:
+                pass
+
+        # Try handling concatenated JSON objects (}{)
+        # This handles cases where multiple JSON objects are on one line
+        if '}{' in text:
+            try:
+                # Split on }{ and reconstruct individual objects
+                parts = text.replace('}{', '}\n{').split('\n')
+                parsed = [json.loads(part.strip()) for part in parts if part.strip()]
+                return parsed if len(parsed) > 1 else parsed[0] if parsed else {}
+            except json.JSONDecodeError:
+                pass
+
+        # Last resort: try to extract first valid JSON object
+        try:
+            # Find matching braces for first object
+            if text.startswith('{'):
+                depth = 0
+                in_string = False
+                escape = False
+                for i, char in enumerate(text):
+                    if escape:
+                        escape = False
+                        continue
+                    if char == '\\':
+                        escape = True
+                        continue
+                    if char == '"':
+                        in_string = not in_string
+                        continue
+                    if not in_string:
+                        if char == '{':
+                            depth += 1
+                        elif char == '}':
+                            depth -= 1
+                            if depth == 0:
+                                # Found end of first object
+                                return json.loads(text[:i+1])
+        except json.JSONDecodeError:
+            pass
+
+        # Return raw text if all parsing attempts fail
+        logger.warning(f"Could not parse JSON data, returning raw text ({len(text)} bytes)")
+        return text
 
     def _add_received_data(self, entry: Dict[str, Any]) -> None:
         """Add entry to received data list."""
