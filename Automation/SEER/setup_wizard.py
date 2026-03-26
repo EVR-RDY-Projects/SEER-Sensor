@@ -345,39 +345,26 @@ def main(non_interactive: bool = False) -> None:
     print("\n== Scout Receiver Configuration ==")
     print("The Scout Receiver accepts data from SCOUT Agents running on Windows endpoints.")
 
-    cfg["scout_receiver"]["enabled"] = prompt_bool(
-        "Enable Scout Receiver",
-        cfg["scout_receiver"]["enabled"]
-    )
+    cfg["scout_receiver"]["enabled"] = prompt_bool("Enable Scout Receiver", cfg["scout_receiver"]["enabled"])
 
     if cfg["scout_receiver"]["enabled"]:
         cfg["scout_receiver"]["server"]["host"] = prompt_str(
-            "Scout Receiver listen address (0.0.0.0 for all interfaces)",
-            cfg["scout_receiver"]["server"]["host"]
+            "Scout Receiver listen address (0.0.0.0 for all interfaces)", cfg["scout_receiver"]["server"]["host"]
         )
         cfg["scout_receiver"]["server"]["port"] = prompt_int(
-            "Scout Receiver HTTP port",
-            cfg["scout_receiver"]["server"]["port"],
-            1024,
-            65535
+            "Scout Receiver HTTP port", cfg["scout_receiver"]["server"]["port"], 1024, 65535
         )
         cfg["scout_receiver"]["storage"]["data_dir"] = prompt_str(
-            "Scout data storage directory",
-            cfg["scout_receiver"]["storage"]["data_dir"]
+            "Scout data storage directory", cfg["scout_receiver"]["storage"]["data_dir"]
         )
         cfg["scout_receiver"]["storage"]["retention_days"] = prompt_int(
-            "Data retention (days)",
-            cfg["scout_receiver"]["storage"]["retention_days"],
-            1,
-            365
+            "Data retention (days)", cfg["scout_receiver"]["storage"]["retention_days"], 1, 365
         )
         cfg["scout_receiver"]["validation"]["verify_checksums"] = prompt_bool(
-            "Verify data checksums",
-            cfg["scout_receiver"]["validation"]["verify_checksums"]
+            "Verify data checksums", cfg["scout_receiver"]["validation"]["verify_checksums"]
         )
         cfg["scout_receiver"]["logging"]["level"] = prompt_str(
-            "Log level (DEBUG/INFO/WARNING/ERROR)",
-            cfg["scout_receiver"]["logging"]["level"]
+            "Log level (DEBUG/INFO/WARNING/ERROR)", cfg["scout_receiver"]["logging"]["level"]
         ).upper()
 
     # Do work

@@ -106,7 +106,8 @@ def get_receiver_stats():
     """Fetch Scout Receiver statistics from HTTP endpoint."""
     try:
         import urllib.request
-        url = f'http://localhost:{RECEIVER_PORT}/api/statistics'
+
+        url = f"http://localhost:{RECEIVER_PORT}/api/statistics"
         with urllib.request.urlopen(url, timeout=2) as r:
             return json.load(r)
     except Exception:
@@ -795,26 +796,26 @@ def render(stdscr):
         try:
             stdscr.addstr(16, 0, "SCOUT:")
             if recv_stats:
-                total_req = recv_stats.get('total_requests', 0)
-                success_rate = recv_stats.get('success_rate', 0)
-                data_mb = recv_stats.get('total_data_received_mb', 0)
-                sources = recv_stats.get('unique_sources', 0)
-                rpm = recv_stats.get('requests_per_minute', 0)
-                stdscr.addstr(17, 2, f"  Requests    : ")
+                total_req = recv_stats.get("total_requests", 0)
+                success_rate = recv_stats.get("success_rate", 0)
+                data_mb = recv_stats.get("total_data_received_mb", 0)
+                sources = recv_stats.get("unique_sources", 0)
+                rpm = recv_stats.get("requests_per_minute", 0)
+                stdscr.addstr(17, 2, "  Requests    : ")
                 stdscr.addstr(17, 18, f"{total_req}", curses.color_pair(2) | curses.A_BOLD)
                 stdscr.addstr(17, 26, f" ({success_rate}% ok)", curses.color_pair(5))
-                stdscr.addstr(18, 2, f"  Data        : ")
+                stdscr.addstr(18, 2, "  Data        : ")
                 stdscr.addstr(18, 18, f"{data_mb} MB", curses.color_pair(2))
                 stdscr.addstr(18, 30, f" ({sources} src, {rpm}/min)", curses.color_pair(5))
             else:
-                stdscr.addstr(17, 2, f"  Status      : ", curses.color_pair(3))
-                stdscr.addstr(17, 18, f"unavailable", curses.color_pair(1))
+                stdscr.addstr(17, 2, "  Status      : ", curses.color_pair(3))
+                stdscr.addstr(17, 18, "unavailable", curses.color_pair(1))
         except Exception:
             stdscr.addstr(16, 0, "SCOUT:")
             if recv_stats:
                 stdscr.addstr(17, 2, f"  Requests    : {recv_stats.get('total_requests', 0)}")
             else:
-                stdscr.addstr(17, 2, f"  Status      : unavailable")
+                stdscr.addstr(17, 2, "  Status      : unavailable")
 
         # Controls: make keys accent colored for quick scanning
         try:
@@ -998,7 +999,7 @@ def main():
         # Show Scout Receiver stats
         recv = s.get("receiver")
         if recv:
-            print(f"  SCOUT RECEIVER:")
+            print("  SCOUT RECEIVER:")
             print(f"    Requests  : {recv.get('total_requests', 0)} total, {recv.get('success_rate', 0)}% success")
             print(f"    Data      : {recv.get('total_data_received_mb', 0)} MB received")
             print(f"    Sources   : {recv.get('unique_sources', 0)} unique")

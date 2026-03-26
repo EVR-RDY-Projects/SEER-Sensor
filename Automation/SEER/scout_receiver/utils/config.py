@@ -11,12 +11,11 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-
 # Default configuration path
-DEFAULT_CONFIG_PATH = Path('/opt/seer/etc/seer.yml')
+DEFAULT_CONFIG_PATH = Path("/opt/seer/etc/seer.yml")
 
 # Environment variable override
-ENV_CONFIG_PATH = 'SEER_CONFIG'
+ENV_CONFIG_PATH = "SEER_CONFIG"
 
 
 class ScoutReceiverConfig:
@@ -55,7 +54,7 @@ class ScoutReceiverConfig:
 
     def _extract_receiver_config(self) -> Dict[str, Any]:
         """Extract scout_receiver section with defaults."""
-        receiver_config = self._full_config.get('scout_receiver', {})
+        receiver_config = self._full_config.get("scout_receiver", {})
 
         # Merge with defaults
         defaults = self._get_defaults()
@@ -64,41 +63,41 @@ class ScoutReceiverConfig:
     def _get_defaults(self) -> Dict[str, Any]:
         """Return default configuration values."""
         return {
-            'enabled': True,
-            'server': {
-                'host': '0.0.0.0',
-                'port': 8080,
-                'cors_enabled': True,
-                'max_request_size_mb': 50,
+            "enabled": True,
+            "server": {
+                "host": "0.0.0.0",
+                "port": 8080,
+                "cors_enabled": True,
+                "max_request_size_mb": 50,
             },
-            'storage': {
-                'data_dir': '/var/seer/scout_data',
-                'max_file_size_mb': 100,
-                'rotate_files': True,
-                'retention_days': 30,
-                'organize_by_date': True,
+            "storage": {
+                "data_dir": "/var/seer/scout_data",
+                "max_file_size_mb": 100,
+                "rotate_files": True,
+                "retention_days": 30,
+                "organize_by_date": True,
             },
-            'validation': {
-                'enforce_schema': True,
-                'verify_checksums': True,
-                'max_data_size_mb': 50,
-                'strict_mode': False,
+            "validation": {
+                "enforce_schema": True,
+                "verify_checksums": True,
+                "max_data_size_mb": 50,
+                "strict_mode": False,
             },
-            'heartbeat': {
-                'enabled': True,
-                'interval_seconds': 30,
-                'response_delay_ms': 0,
+            "heartbeat": {
+                "enabled": True,
+                "interval_seconds": 30,
+                "response_delay_ms": 0,
             },
-            'logging': {
-                'level': 'INFO',
-                'format': 'structured',
-                'file': '/var/log/seer/scout_receiver.log',
-                'max_size_mb': 50,
-                'backup_count': 5,
+            "logging": {
+                "level": "INFO",
+                "format": "structured",
+                "file": "/var/log/seer/scout_receiver.log",
+                "max_size_mb": 50,
+                "backup_count": 5,
             },
-            'web_interface': {
-                'enabled': True,
-                'static_path': '/opt/seer/www/scout_dashboard',
+            "web_interface": {
+                "enabled": True,
+                "static_path": "/opt/seer/www/scout_dashboard",
             },
         }
 
@@ -122,7 +121,7 @@ class ScoutReceiverConfig:
         Returns:
             Configuration value or default
         """
-        keys = key.split('.')
+        keys = key.split(".")
         value = self._config
 
         for k in keys:
@@ -162,7 +161,7 @@ class ScoutReceiverConfig:
 
     def is_enabled(self) -> bool:
         """Check if Scout Receiver is enabled."""
-        return self.get('enabled', True)
+        return self.get("enabled", True)
 
     def __repr__(self) -> str:
         return f"ScoutReceiverConfig(path={self.config_path}, enabled={self.is_enabled()})"

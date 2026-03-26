@@ -6,19 +6,16 @@ Provides structured logging capabilities with file and console output.
 
 import logging
 import logging.handlers
-import os
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
-
+from typing import Dict, Optional
 
 # Module-level logger cache
 _loggers: Dict[str, logging.Logger] = {}
 
 # Default log format
-PLAIN_FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-STRUCTURED_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
+PLAIN_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+STRUCTURED_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s"
 
 
 class StructuredFormatter(logging.Formatter):
@@ -33,10 +30,10 @@ class StructuredFormatter(logging.Formatter):
         message = super().format(record)
 
         # Add extra fields if present
-        if self.include_extra and hasattr(record, 'extra_data'):
+        if self.include_extra and hasattr(record, "extra_data"):
             extra = record.extra_data
             if extra:
-                extra_str = ' | '.join(f"{k}={v}" for k, v in extra.items())
+                extra_str = " | ".join(f"{k}={v}" for k, v in extra.items())
                 message = f"{message} | {extra_str}"
 
         return message
@@ -48,53 +45,59 @@ class PacketLogger:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
 
-    def log_packet_received(self, source_ip: str, packet_size: int,
-                           protocol: str, timestamp: float) -> None:
+    def log_packet_received(self, source_ip: str, packet_size: int, protocol: str, timestamp: float) -> None:
         """Log packet reception event."""
         self.logger.info(
             f"Packet received from {source_ip}",
-            extra={'extra_data': {
-                'source_ip': source_ip,
-                'size': packet_size,
-                'protocol': protocol,
-                'timestamp': timestamp
-            }}
+            extra={
+                "extra_data": {
+                    "source_ip": source_ip,
+                    "size": packet_size,
+                    "protocol": protocol,
+                    "timestamp": timestamp,
+                }
+            },
         )
 
-    def log_data_extracted(self, source_ip: str, data_size: int,
-                          data_type: str, checksum: str,
-                          processing_time: float) -> None:
+    def log_data_extracted(
+        self, source_ip: str, data_size: int, data_type: str, checksum: str, processing_time: float
+    ) -> None:
         """Log successful data extraction."""
         self.logger.info(
             f"Data extracted: {data_type} from {source_ip}",
-            extra={'extra_data': {
-                'source_ip': source_ip,
-                'data_size': data_size,
-                'data_type': data_type,
-                'checksum': checksum[:16] if checksum else 'none',
-                'processing_time_ms': round(processing_time * 1000, 2)
-            }}
+            extra={
+                "extra_data": {
+                    "source_ip": source_ip,
+                    "data_size": data_size,
+                    "data_type": data_type,
+                    "checksum": checksum[:16] if checksum else "none",
+                    "processing_time_ms": round(processing_time * 1000, 2),
+                }
+            },
         )
 
-    def log_validation_error(self, source_ip: str, error_type: str,
-                            error_message: str, data_size: int) -> None:
+    def log_validation_error(self, source_ip: str, error_type: str, error_message: str, data_size: int) -> None:
         """Log validation error."""
         self.logger.warning(
             f"Validation error from {source_ip}: {error_type}",
-            extra={'extra_data': {
-                'source_ip': source_ip,
-                'error_type': error_type,
-                'error_message': error_message,
-                'data_size': data_size
-            }}
+            extra={
+                "extra_data": {
+                    "source_ip": source_ip,
+                    "error_type": error_type,
+                    "error_message": error_message,
+                    "data_size": data_size,
+                }
+            },
         )
 
 
-def setup_logging(level: str = 'INFO',
-                  format_type: str = 'structured',
-                  log_file: Optional[str] = None,
-                  max_size_mb: int = 50,
-                  backup_count: int = 5) -> None:
+def setup_logging(
+    level: str = "INFO",
+    format_type: str = "structured",
+    log_file: Optional[str] = None,
+    max_size_mb: int = 50,
+    backup_count: int = 5,
+) -> None:
     """Configure logging for the Scout Receiver.
 
     Args:
@@ -108,13 +111,13 @@ def setup_logging(level: str = 'INFO',
     numeric_level = getattr(logging, level.upper(), logging.INFO)
 
     # Create formatter
-    if format_type == 'structured':
+    if format_type == "structured":
         formatter = StructuredFormatter()
     else:
         formatter = logging.Formatter(PLAIN_FORMAT)
 
     # Configure root logger for scout_receiver
-    root_logger = logging.getLogger('scout_receiver')
+    root_logger = logging.getLogger("scout_receiver")
     root_logger.setLevel(numeric_level)
 
     # Clear existing handlers
@@ -133,9 +136,7 @@ def setup_logging(level: str = 'INFO',
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
             file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=max_size_mb * 1024 * 1024,
-                backupCount=backup_count
+                log_file, maxBytes=max_size_mb * 1024 * 1024, backupCount=backup_count
             )
             file_handler.setLevel(numeric_level)
             file_handler.setFormatter(formatter)
@@ -154,8 +155,8 @@ def get_logger(name: str) -> logging.Logger:
         Configured logger instance
     """
     # Prefix with scout_receiver if not already
-    if not name.startswith('scout_receiver'):
-        name = f'scout_receiver.{name}'
+    if not name.startswith("scout_receiver"):
+        name = f"scout_receiver.{name}"
 
     if name not in _loggers:
         _loggers[name] = logging.getLogger(name)
@@ -169,4 +170,4 @@ def get_packet_logger() -> PacketLogger:
     Returns:
         PacketLogger instance
     """
-    return PacketLogger(get_logger('packets'))
+    return PacketLogger(get_logger("packets"))

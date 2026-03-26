@@ -6,14 +6,12 @@ organized file structure and integrity tracking.
 """
 
 import json
-import os
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .utils.logging import get_logger
-from .validation import calculate_checksum
 
 logger = get_logger(__name__)
 
@@ -29,18 +27,18 @@ class ScoutDataStorage:
         """
         config = config or {}
 
-        self.data_dir = Path(config.get('data_dir', '/var/seer/scout_data'))
-        self.max_file_size = config.get('max_file_size_mb', 100) * 1024 * 1024
-        self.rotate_files = config.get('rotate_files', True)
-        self.retention_days = config.get('retention_days', 30)
-        self.organize_by_date = config.get('organize_by_date', True)
+        self.data_dir = Path(config.get("data_dir", "/var/seer/scout_data"))
+        self.max_file_size = config.get("max_file_size_mb", 100) * 1024 * 1024
+        self.rotate_files = config.get("rotate_files", True)
+        self.retention_days = config.get("retention_days", 30)
+        self.organize_by_date = config.get("organize_by_date", True)
 
         # Statistics
         self.stats = {
-            'files_created': 0,
-            'bytes_written': 0,
-            'write_errors': 0,
-            'files_rotated': 0,
+            "files_created": 0,
+            "bytes_written": 0,
+            "write_errors": 0,
+            "files_rotated": 0,
         }
 
         # Ensure data directory exists
@@ -65,13 +63,13 @@ class ScoutDataStorage:
             Path object for the storage location
         """
         if self.organize_by_date:
-            date_str = datetime.now().strftime('%Y%m%d')
+            date_str = datetime.now().strftime("%Y%m%d")
             return self.data_dir / date_str
         return self.data_dir
 
-    def save_data(self, data: Any, data_type: str,
-                  source_ip: str, host_id: str,
-                  metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    def save_data(
+        self, data: Any, data_type: str, source_ip: str, host_id: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
         """Save received data to storage.
 
         Args:
@@ -90,44 +88,44 @@ class ScoutDataStorage:
             storage_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate filename with timestamp
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_host_id = self._sanitize_filename(host_id)
             filename = f"scout_{data_type}_{safe_host_id}_{timestamp}.json"
             filepath = storage_dir / filename
 
             # Build envelope with metadata
             envelope = {
-                'received_at': datetime.now().isoformat(),
-                'source_ip': source_ip,
-                'host_id': host_id,
-                'data_type': data_type,
-                'record_count': self._count_records(data),
-                'data': data,
+                "received_at": datetime.now().isoformat(),
+                "source_ip": source_ip,
+                "host_id": host_id,
+                "data_type": data_type,
+                "record_count": self._count_records(data),
+                "data": data,
             }
 
             if metadata:
-                envelope['metadata'] = metadata
+                envelope["metadata"] = metadata
 
             # Write to file
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(envelope, f, indent=2, default=str)
 
             # Update statistics
             file_size = filepath.stat().st_size
-            self.stats['files_created'] += 1
-            self.stats['bytes_written'] += file_size
+            self.stats["files_created"] += 1
+            self.stats["bytes_written"] += file_size
 
             logger.info(f"Saved data to {filepath} ({file_size} bytes)")
             return str(filepath)
 
         except Exception as e:
-            self.stats['write_errors'] += 1
+            self.stats["write_errors"] += 1
             logger.error(f"Failed to save data: {e}")
             return None
 
-    def save_raw_data(self, data: bytes, data_type: str,
-                      source_ip: str, host_id: str,
-                      extension: str = 'bin') -> Optional[str]:
+    def save_raw_data(
+        self, data: bytes, data_type: str, source_ip: str, host_id: str, extension: str = "bin"
+    ) -> Optional[str]:
         """Save raw binary data to storage.
 
         Args:
@@ -144,28 +142,27 @@ class ScoutDataStorage:
             storage_dir = self._get_storage_path(data_type, host_id)
             storage_dir.mkdir(parents=True, exist_ok=True)
 
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_host_id = self._sanitize_filename(host_id)
             filename = f"scout_{data_type}_{safe_host_id}_{timestamp}.{extension}"
             filepath = storage_dir / filename
 
-            with open(filepath, 'wb') as f:
+            with open(filepath, "wb") as f:
                 f.write(data)
 
             file_size = filepath.stat().st_size
-            self.stats['files_created'] += 1
-            self.stats['bytes_written'] += file_size
+            self.stats["files_created"] += 1
+            self.stats["bytes_written"] += file_size
 
             logger.info(f"Saved raw data to {filepath} ({file_size} bytes)")
             return str(filepath)
 
         except Exception as e:
-            self.stats['write_errors'] += 1
+            self.stats["write_errors"] += 1
             logger.error(f"Failed to save raw data: {e}")
             return None
 
-    def get_recent_files(self, limit: int = 20,
-                         data_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_recent_files(self, limit: int = 20, data_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get list of recently saved files.
 
         Args:
@@ -184,18 +181,20 @@ class ScoutDataStorage:
             for filepath in self.data_dir.rglob(pattern):
                 try:
                     stat = filepath.stat()
-                    files.append({
-                        'path': str(filepath),
-                        'filename': filepath.name,
-                        'size': stat.st_size,
-                        'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                        'modified_ts': stat.st_mtime,
-                    })
+                    files.append(
+                        {
+                            "path": str(filepath),
+                            "filename": filepath.name,
+                            "size": stat.st_size,
+                            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                            "modified_ts": stat.st_mtime,
+                        }
+                    )
                 except Exception:
                     continue
 
             # Sort by modification time, most recent first
-            files.sort(key=lambda x: x['modified_ts'], reverse=True)
+            files.sort(key=lambda x: x["modified_ts"], reverse=True)
 
             return files[:limit]
 
@@ -213,7 +212,7 @@ class ScoutDataStorage:
             File content as dictionary, or None if failed
         """
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f"Failed to read file {filepath}: {e}")
@@ -257,7 +256,7 @@ class ScoutDataStorage:
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} files older than {retention} days")
 
-            self.stats['files_rotated'] += deleted
+            self.stats["files_rotated"] += deleted
             return deleted
 
         except Exception as e:
@@ -289,23 +288,24 @@ class ScoutDataStorage:
                 disk_free_pct = None
 
             return {
-                'data_dir': str(self.data_dir),
-                'total_files': total_files,
-                'total_size_bytes': total_size,
-                'total_size_mb': round(total_size / (1024 * 1024), 2),
-                'disk_free_pct': round(disk_free_pct, 1) if disk_free_pct else None,
-                'files_created': self.stats['files_created'],
-                'bytes_written': self.stats['bytes_written'],
-                'write_errors': self.stats['write_errors'],
-                'files_rotated': self.stats['files_rotated'],
+                "data_dir": str(self.data_dir),
+                "total_files": total_files,
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "disk_free_pct": round(disk_free_pct, 1) if disk_free_pct else None,
+                "files_created": self.stats["files_created"],
+                "bytes_written": self.stats["bytes_written"],
+                "write_errors": self.stats["write_errors"],
+                "files_rotated": self.stats["files_rotated"],
             }
 
         except Exception as e:
             logger.error(f"Failed to get storage stats: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
-    def get_data_for_export(self, start_date: Optional[datetime] = None,
-                            end_date: Optional[datetime] = None) -> List[Path]:
+    def get_data_for_export(
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
+    ) -> List[Path]:
         """Get list of data files for export.
 
         Args:
@@ -350,7 +350,7 @@ class ScoutDataStorage:
         # Replace unsafe characters
         unsafe_chars = '<>:"/\\|?*'
         for char in unsafe_chars:
-            name = name.replace(char, '_')
+            name = name.replace(char, "_")
 
         # Limit length
         return name[:50]
@@ -368,7 +368,7 @@ class ScoutDataStorage:
             return len(data)
         elif isinstance(data, dict):
             # Check for nested data arrays
-            for key in ['events', 'changes', 'records', 'items', 'data']:
+            for key in ["events", "changes", "records", "items", "data"]:
                 if key in data and isinstance(data[key], list):
                     return len(data[key])
             return 1
