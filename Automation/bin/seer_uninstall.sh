@@ -68,8 +68,8 @@ confirm() {
 
 # What we'll do
 say "SEER uninstall plan:"
-echo "  - Stop & disable: seer-capture@*.service, seer-move-oldest.service, seer-move-oldest.timer, seer-zeek@*.service, seer-hotswap.service"
-echo "  - Remove units   : /etc/systemd/system/seer-capture@.service, seer-move-oldest.{service,timer}, seer-zeek@.service, seer-hotswap.service"
+echo "  - Stop & disable: seer-capture@*.service, seer-move-oldest.service, seer-move-oldest.timer, seer-zeek@*.service, seer-hotswap.service, seer-scout-receiver.service"
+echo "  - Remove units   : /etc/systemd/system/seer-capture@.service, seer-move-oldest.{service,timer}, seer-zeek@.service, seer-hotswap.service, seer-scout-receiver.service"
 echo "  - Remove binaries: /usr/local/bin/seer-capture.sh, /usr/local/bin/seer_console.py, /usr/local/bin/seer-console, /usr/local/bin/seer-zeek.sh, /usr/local/bin/seer_hotswap.py"
 if [[ $PURGE -eq 1 ]]; then
   echo "  - PURGE config   : /opt/seer (incl. /opt/seer/etc/seer.yml backups)"
@@ -91,33 +91,35 @@ mapfile -t ZEEK_UNITS    < <(sc list-units --type=service --all --no-legend --pl
 stop_units "${CAPTURE_UNITS[@]:-}"
 stop_units "${ZEEK_UNITS[@]:-}"
 
-# Stop and disable mover units (timer then service)
-stop_units seer-move-oldest.timer seer-move-oldest.service seer-hotswap.service
+# Stop and disable mover units (timer then service) and scout receiver
+stop_units seer-move-oldest.timer seer-move-oldest.service seer-hotswap.service seer-scout-receiver.service
 disable_units "${CAPTURE_UNITS[@]:-}"
 disable_units "${ZEEK_UNITS[@]:-}"
-disable_units seer-move-oldest.timer seer-move-oldest.service seer-hotswap.service
+disable_units seer-move-oldest.timer seer-move-oldest.service seer-hotswap.service seer-scout-receiver.service
 ok "services/timer stopped & disabled (where present)"
 
 # Belt-and-suspenders: ensure no lingering processes remain before removing units
-say "1b) Ensure capture/zeek/hotswap processes are not running"
+say "1b) Ensure capture/zeek/hotswap/scout-receiver processes are not running"
 # Try systemd kill once more in case any template instances were transient
-stop_units "${CAPTURE_UNITS[@]:-}" "${ZEEK_UNITS[@]:-}" seer-hotswap.service
+stop_units "${CAPTURE_UNITS[@]:-}" "${ZEEK_UNITS[@]:-}" seer-hotswap.service seer-scout-receiver.service
 
 # Direct process kills (handles cases where unit files vanish while processes keep running)
 pkill -x tcpdump 2>/dev/null || true
 pkill -x zeek 2>/dev/null || true
 pkill -f seer_hotswap.py 2>/dev/null || true
+pkill -f 'scout_receiver.server' 2>/dev/null || true
 
 # Wait briefly for termination
 for _ in 1 2 3 4 5; do
   sleep 1
-  pgrep -x tcpdump >/dev/null 2>&1 || pgrep -x zeek >/dev/null 2>&1 || pgrep -f seer_hotswap.py >/dev/null 2>&1 || break
+  pgrep -x tcpdump >/dev/null 2>&1 || pgrep -x zeek >/dev/null 2>&1 || pgrep -f seer_hotswap.py >/dev/null 2>&1 || pgrep -f 'scout_receiver.server' >/dev/null 2>&1 || break
 done
 
 # Final force if anything still lingers
 pgrep -x tcpdump >/dev/null 2>&1 && pkill -9 -x tcpdump 2>/dev/null || true
 pgrep -x zeek >/dev/null 2>&1 && pkill -9 -x zeek 2>/dev/null || true
 pgrep -f seer_hotswap.py >/dev/null 2>&1 && pkill -9 -f seer_hotswap.py 2>/dev/null || true
+pgrep -f 'scout_receiver.server' >/dev/null 2>&1 && pkill -9 -f 'scout_receiver.server' 2>/dev/null || true
 
 # Clean up known runtime files
 rm -f /run/zeek-*.pid /run/zeek-*.lock 2>/dev/null || true
@@ -129,7 +131,8 @@ rm -f /etc/systemd/system/seer-capture@.service \
       /etc/systemd/system/seer-move-oldest.timer \
       /etc/systemd/system/seer-move-oldest.path \
       /etc/systemd/system/seer-zeek@.service \
-      /etc/systemd/system/seer-hotswap.service
+      /etc/systemd/system/seer-hotswap.service \
+      /etc/systemd/system/seer-scout-receiver.service
 sc daemon-reload
 ok "systemd units removed and daemon reloaded"
 
@@ -200,6 +203,7 @@ PY
   [[ -d /var/seer ]] && rm -rf /var/seer || true
   [[ -d /var/seer/json_spool ]] && rm -rf /var/seer/json_spool || true
   [[ -d /var/seer/pcap_ring ]] && rm -rf /var/seer/pcap_ring || true
+  [[ -d /var/seer/scout_data ]] && rm -rf /var/seer/scout_data || true
   [[ -d /opt/seer/var/queue ]] && rm -rf /opt/seer/var/queue || true
   [[ -d /opt/seer/var/backlog ]] && rm -rf /opt/seer/var/backlog || true
   [[ -d /var/log/seer ]] && rm -rf /var/log/seer || true

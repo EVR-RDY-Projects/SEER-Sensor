@@ -15,20 +15,38 @@ while [[ $# -gt 0 ]]; do
 done
 
 # deps we expect
-if ! dpkg -s python3-yaml >/dev/null 2>&1; then
-  echo "Installing python3-yaml..."
-  sudo -E apt-get update -qq || true
-  sudo -E apt-get install -y -qq python3-yaml
-fi
+APT_UPDATED=0
+for pkg in python3-yaml python3-venv python3-pip; do
+  if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    if [[ $APT_UPDATED -eq 0 ]]; then
+      echo "Updating apt cache..."
+      sudo -E apt-get update -qq || true
+      APT_UPDATED=1
+    fi
+    echo "Installing $pkg..."
+    sudo -E apt-get install -y -qq "$pkg"
+  fi
+done
 if ! command -v tcpdump >/dev/null 2>&1; then
+  if [[ $APT_UPDATED -eq 0 ]]; then
+    sudo -E apt-get update -qq || true
+  fi
   echo "Installing tcpdump..."
-  sudo -E apt-get update -qq || true
   sudo -E apt-get install -y -qq tcpdump
 fi
 
 # Resolve repository root (so script can be run from any cwd)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Create /opt/seer/etc directory and copy example config if no config exists
+sudo mkdir -p /opt/seer/etc
+if [[ ! -f /opt/seer/etc/seer.yml ]]; then
+  if [[ -f "$REPO_ROOT/Automation/etc/seer.yml.example" ]]; then
+    echo "Installing example configuration to /opt/seer/etc/seer.yml"
+    sudo install -m 0644 "$REPO_ROOT/Automation/etc/seer.yml.example" /opt/seer/etc/seer.yml
+  fi
+fi
 
 # install wrapper (standardize to /usr/local/bin)
 echo "Installing /usr/local/bin/seer-capture.sh"
@@ -90,6 +108,90 @@ fi
 if [[ -f "$REPO_ROOT/Automation/systemd/seer-hotswap.service" ]]; then
   echo "Installing seer-hotswap.service"
   sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-hotswap.service" /etc/systemd/system/seer-hotswap.service
+fi
+
+# Install Scout Receiver (HTTP server for SCOUT Agent data)
+if [[ -d "$REPO_ROOT/Automation/SEER/scout_receiver" ]]; then
+  echo "Installing Scout Receiver module..."
+
+  # Create directories for Scout Receiver
+  sudo mkdir -p /var/seer/scout_data
+  sudo mkdir -p /opt/seer/Automation/SEER/scout_receiver
+  sudo mkdir -p /opt/seer/Automation/SEER/scout_receiver/utils
+
+  # Create __init__.py for SEER package so Python can find the module
+  sudo touch /opt/seer/Automation/__init__.py
+  sudo touch /opt/seer/Automation/SEER/__init__.py
+
+  # Copy scout_receiver module to /opt/seer
+  sudo cp -r "$REPO_ROOT/Automation/SEER/scout_receiver"/* /opt/seer/Automation/SEER/scout_receiver/
+
+  # Set ownership
+  sudo chown -R seer:seer /var/seer/scout_data 2>/dev/null || true
+  sudo chown -R seer:seer /opt/seer/Automation 2>/dev/null || true
+
+  # Create virtualenv if it doesn't exist or is broken, and install dependencies
+  # Always recreate venv to ensure clean state
+  echo "Creating Python virtualenv at /opt/seer/venv..."
+  sudo rm -rf /opt/seer/venv 2>/dev/null || true
+  if ! sudo python3 -m venv /opt/seer/venv; then
+    echo "ERROR: Failed to create virtualenv. Ensure python3-venv is installed." >&2
+    echo "Trying: sudo apt-get install -y python3-venv" >&2
+    sudo -E apt-get install -y python3-venv
+    if ! sudo python3 -m venv /opt/seer/venv; then
+      echo "ERROR: Still cannot create venv. Will use system Python." >&2
+    fi
+  fi
+  if [[ -d /opt/seer/venv ]]; then
+    sudo chown -R seer:seer /opt/seer/venv
+  fi
+
+  # Install Python dependencies for Scout Receiver
+  if [[ -f "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" ]]; then
+    echo "Installing Scout Receiver Python dependencies..."
+    DEPS_INSTALLED=0
+
+    # Try venv pip first
+    if [[ -x /opt/seer/venv/bin/pip ]]; then
+      echo "  Using virtualenv pip..."
+      sudo /opt/seer/venv/bin/pip install --upgrade pip -q 2>/dev/null || true
+      if sudo /opt/seer/venv/bin/pip install -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt"; then
+        # Verify it actually worked in the venv
+        if /opt/seer/venv/bin/python -c "import aiohttp" 2>/dev/null; then
+          DEPS_INSTALLED=1
+          echo "  Scout Receiver dependencies installed in virtualenv."
+        else
+          echo "  WARNING: pip reported success but aiohttp not importable in venv"
+        fi
+      fi
+    fi
+
+    # Fallback to system pip if venv failed
+    if [[ $DEPS_INSTALLED -eq 0 ]]; then
+      echo "  Falling back to system pip..."
+      if sudo pip3 install --break-system-packages -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" 2>/dev/null; then
+        DEPS_INSTALLED=1
+      elif sudo pip3 install -r "$REPO_ROOT/Automation/SEER/scout_receiver/requirements.txt" 2>/dev/null; then
+        DEPS_INSTALLED=1
+      fi
+    fi
+
+    # Final verification
+    if /opt/seer/venv/bin/python -c "import aiohttp" 2>/dev/null; then
+      echo "  Verified: aiohttp is available in venv."
+    elif python3 -c "import aiohttp" 2>/dev/null; then
+      echo "  Verified: aiohttp is available in system Python."
+    else
+      echo "ERROR: aiohttp not importable after install. Scout Receiver will not work." >&2
+      echo "  Try manually: sudo /opt/seer/venv/bin/pip install aiohttp aiohttp-cors pyyaml jsonschema" >&2
+    fi
+  fi
+
+  # Install Scout Receiver systemd service
+  if [[ -f "$REPO_ROOT/Automation/systemd/seer-scout-receiver.service" ]]; then
+    echo "Installing seer-scout-receiver.service"
+    sudo install -m 0644 "$REPO_ROOT/Automation/systemd/seer-scout-receiver.service" /etc/systemd/system/seer-scout-receiver.service
+  fi
 fi
 
 # Ensure log/state directory exists with correct ownership
@@ -219,6 +321,12 @@ fi
 if [[ -f /etc/systemd/system/seer-hotswap.service ]]; then
   echo "Enabling and starting seer-hotswap.service"
   sudo systemctl enable --now seer-hotswap.service || true
+fi
+
+# Enable and start Scout Receiver if the unit was installed
+if [[ -f /etc/systemd/system/seer-scout-receiver.service ]]; then
+  echo "Enabling and starting seer-scout-receiver.service"
+  sudo systemctl enable --now seer-scout-receiver.service || true
 fi
 
 echo "Verification: listing units and recent journal entries"

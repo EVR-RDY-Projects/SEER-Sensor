@@ -1,0 +1,43 @@
+[Unit]
+Description=SEER Scout Receiver - HTTP server for SCOUT Agent data
+Documentation=file:///opt/seer/docs/MOCK_SEER_INTEGRATION_PLAN.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=seer
+Group=seer
+WorkingDirectory=/opt/seer
+
+# Use Python from virtualenv if available, otherwise system python3
+ExecStart=/bin/bash -c 'if [ -x /opt/seer/venv/bin/python ]; then exec /opt/seer/venv/bin/python -m SEER.scout_receiver.server; else exec /usr/bin/python3 -m SEER.scout_receiver.server; fi'
+
+# Restart policy
+Restart=always
+RestartSec=5
+StartLimitBurst=3
+StartLimitInterval=60
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=seer-scout-receiver
+
+# Environment
+Environment=PYTHONPATH=/opt/seer/Automation
+Environment=SEER_CONFIG=/opt/seer/etc/seer.yml
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/seer /var/log/seer /opt/seer/var
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
