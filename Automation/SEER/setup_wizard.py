@@ -9,13 +9,13 @@ Req0 — SEER Setup Wizard
 
 import argparse
 import os
+import shlex
 import shutil
 import sys
 import time
 from pathlib import Path
 
 import yaml
-import shlex
 
 DEFAULTS = {
     "interface": "enp2s0",
@@ -35,11 +35,7 @@ DEFAULTS = {
         "disk_hard_pct": 90,
     },
     "export": {
-        "mount_candidates": [
-            "/mnt/seer_external",
-            "/mnt/SEER_EXT",
-            "/media/seer_external"
-        ],
+        "mount_candidates": ["/mnt/seer_external", "/mnt/SEER_EXT", "/media/seer_external"],
         "min_free_pct": 2,
         "poll_interval": 2,
     },
@@ -140,9 +136,9 @@ def install_wait_helper(iface: str) -> None:
     # default timeout (seconds)
     timeout = 60
     try:
-        src = Path(__file__).parents[2] / 'bin' / 'seer-wait-link.sh'
-        dst = Path('/usr/local/bin/seer-wait-link.sh')
-        drop_dir = '/etc/systemd/system/seer-capture@.service.d'
+        src = Path(__file__).parents[2] / "bin" / "seer-wait-link.sh"
+        dst = Path("/usr/local/bin/seer-wait-link.sh")
+        drop_dir = "/etc/systemd/system/seer-capture@.service.d"
         drop_file = f"{drop_dir}/wait-link.conf"
 
         if src.exists():
@@ -157,12 +153,16 @@ def install_wait_helper(iface: str) -> None:
         try:
             if YAML_PATH.exists():
                 cfg = yaml.safe_load(open(YAML_PATH)) or {}
-                timeout = int(cfg.get('wait_link_timeout', timeout))
+                timeout = int(cfg.get("wait_link_timeout", timeout))
         except Exception:
             pass
 
         # write drop-in to call the helper before the service starts
-        content = f"""[Unit]\nDescription=Wait for link before starting capture\nBefore=seer-capture@%i.service\n\n[Service]\nExecStartPre=/usr/local/bin/seer-wait-link.sh %i {int(timeout)}\n"""
+        content = (
+            f"[Unit]\nDescription=Wait for link before starting capture\n"
+            f"Before=seer-capture@%i.service\n\n[Service]\n"
+            f"ExecStartPre=/usr/local/bin/seer-wait-link.sh %i {int(timeout)}\n"
+        )
         # Ensure drop-in directory exists and write the drop-in via sudo
         os.system(f"sudo mkdir -p {shlex.quote(drop_dir)} || true")
         cmd = f"echo {shlex.quote(content)} | sudo tee {shlex.quote(drop_file)} >/dev/null"
@@ -184,8 +184,8 @@ def configure_monitor_iface(iface: str) -> None:
         print(f"Skipping NIC setup: invalid interface '{iface}'.")
         return
     print(f"Configuring monitor port: {iface} (UP, PROMISC on, offloads off)")
-    rc1 = os.system(f"sudo ip link set dev {iface} up >/dev/null 2>&1")
-    rc2 = os.system(f"sudo ip link set dev {iface} promisc on >/dev/null 2>&1")
+    os.system(f"sudo ip link set dev {iface} up >/dev/null 2>&1")
+    os.system(f"sudo ip link set dev {iface} promisc on >/dev/null 2>&1")
     # ethtool may not exist; that's fine
     if shutil.which("ethtool"):
         os.system(f"sudo ethtool -K {iface} gro off lro off tso off gso off >/dev/null 2>&1 || true")
@@ -204,9 +204,9 @@ def main(non_interactive: bool = False) -> None:
             cfg["interface"] = default_iface
         else:
             # try to pick one from /sys/class/net
-            for p in Path('/sys/class/net').iterdir():
-                if p.name != 'lo' and iface_exists(p.name):
-                    cfg['interface'] = p.name
+            for p in Path("/sys/class/net").iterdir():
+                if p.name != "lo" and iface_exists(p.name):
+                    cfg["interface"] = p.name
                     break
         # Non-interactive: write defaults and exit early
         ensure_seer_user()
@@ -217,7 +217,9 @@ def main(non_interactive: bool = False) -> None:
         try:
             configure_monitor_iface(cfg["interface"])
         except Exception:
-            print("Warning: NIC monitor configuration step failed (non-fatal). You can configure later with ip/ethtool.")
+            print(
+                "Warning: NIC monitor configuration step failed (non-fatal). You can configure later with ip/ethtool."
+            )
         # Install wait-for-link helper and drop-in so capture waits for link at boot
         try:
             install_wait_helper(cfg["interface"])
@@ -303,8 +305,8 @@ def main(non_interactive: bool = False) -> None:
 
 
 def cli_main():
-    p = argparse.ArgumentParser(description='SEER setup wizard (interactive)')
-    p.add_argument('--yes', '-y', action='store_true', help='Use defaults and be non-interactive')
+    p = argparse.ArgumentParser(description="SEER setup wizard (interactive)")
+    p.add_argument("--yes", "-y", action="store_true", help="Use defaults and be non-interactive")
     args = p.parse_args()
     try:
         main(non_interactive=args.yes)

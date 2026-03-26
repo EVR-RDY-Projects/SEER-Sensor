@@ -9,8 +9,8 @@ Req3 — Move oldest closed PCAP from ring -> dest (export drive or backlog).
 import os
 import shutil
 import time
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 import yaml
 
@@ -22,18 +22,18 @@ LOGPATH = Path(CFG["mover_log"])
 QUIET_SECS = 3  # consider file closed if not touched for >= 3s
 
 # Export drive candidates (in priority order)
-MOUNT_CANDIDATES = CFG.get("export", {}).get("mount_candidates", [
-    "/mnt/seer_external",
-    "/mnt/SEER_EXT",
-    "/media/seer_external"
-])
+MOUNT_CANDIDATES = CFG.get("export", {}).get(
+    "mount_candidates", ["/mnt/seer_external", "/mnt/SEER_EXT", "/media/seer_external"]
+)
 MIN_FREE_PCT = CFG.get("export", {}).get("min_free_pct", 2)
+
 
 def log(msg: str):
     LOGPATH.parent.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     with open(LOGPATH, "a") as f:
         f.write(f"{ts} {msg}\n")
+
 
 def detect_export_drive():
     """
@@ -45,22 +45,23 @@ def detect_export_drive():
             continue
         if not os.access(candidate, os.W_OK):
             continue
-        
+
         try:
             stat = os.statvfs(candidate)
             free_bytes = stat.f_bavail * stat.f_frsize
             total_bytes = stat.f_blocks * stat.f_frsize
             free_pct = (free_bytes / total_bytes * 100) if total_bytes > 0 else 0
-            
+
             if free_pct >= MIN_FREE_PCT:
                 # Use dated subdirectory on drive
-                date_dir = datetime.now().strftime('%Y%m%d')
-                pcap_dir = Path(candidate) / 'pcap' / date_dir
+                date_dir = datetime.now().strftime("%Y%m%d")
+                pcap_dir = Path(candidate) / "pcap" / date_dir
                 return (candidate, pcap_dir)
         except Exception:
             continue
-    
+
     return (None, None)
+
 
 def closed(p: Path) -> bool:
     try:
@@ -69,6 +70,7 @@ def closed(p: Path) -> bool:
     except FileNotFoundError:
         return False
 
+
 def pick_oldest_closed():
     files = [p for p in RING.glob("*.pcap") if p.is_file()]
     files.sort(key=lambda p: p.stat().st_mtime)
@@ -76,6 +78,7 @@ def pick_oldest_closed():
         if closed(p):
             return p
     return None
+
 
 def main():
     RING.mkdir(parents=True, exist_ok=True)
@@ -94,7 +97,7 @@ def main():
 
     # Determine destination: export drive (if present) or backlog
     drive_mount, drive_dest = detect_export_drive()
-    
+
     if drive_dest:
         # Drive is present: move directly to drive
         drive_dest.mkdir(parents=True, exist_ok=True)
@@ -104,12 +107,13 @@ def main():
         # No drive: move to backlog
         dest_path = BACKLOG / target.name
         route = "backlog"
-    
+
     try:
         shutil.move(str(target), str(dest_path))
         log(f"[moved] {target.name} -> {route} ({dest_path})")
     except Exception as e:
         log(f"[error] move {target.name} -> {route}: {e}")
+
 
 if __name__ == "__main__":
     main()

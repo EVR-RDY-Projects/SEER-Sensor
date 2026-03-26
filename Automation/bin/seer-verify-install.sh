@@ -133,7 +133,8 @@ else
 fi
 
 # Check Zeek is writing logs into json_spool
-zc_before=$(ls -1 ${json_spool}/*.log ${json_spool}/*.json* 2>/dev/null | wc -l || true)
+# shellcheck disable=SC2034  # zc_before reserved for future pre/post comparison
+zc_before=$(ls -1 "${json_spool}"/*.log "${json_spool}"/*.json* 2>/dev/null | wc -l || true)
 sleep 2
 zc_after=$(ls -1 ${json_spool}/*.log ${json_spool}/*.json* 2>/dev/null | wc -l || true)
 if [[ ${zc_after} -gt 0 ]]; then

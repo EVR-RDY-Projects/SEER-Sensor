@@ -1,1 +1,124 @@
-# (paste the block above)
+---
+name: CI
+
+on:
+  pull_request:
+    branches: [main, development]
+  push:
+    branches: [development]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck on all bash scripts
+        run: |
+          shellcheck --shell=bash --severity=warning \
+            Automation/install.sh \
+            Automation/seer-zeek.sh \
+            Automation/bin/seer-capture.sh \
+            Automation/bin/seer-verify-install.sh \
+            Automation/bin/seer-wait-link.sh \
+            Automation/bin/seer_terminal.sh \
+            Automation/bin/seer_uninstall.sh
+
+  ruff:
+    name: Ruff (lint + format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+  yamllint:
+    name: yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: yamllint -c .yamllint.yaml .
+
+  py-compile:
+    name: Python syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile all Python files
+        run: |
+          find . -name '*.py' -not -path './.git/*' \
+            -exec python -m py_compile {} +
+
+  deps-check:
+    name: Python dependency validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            **/requirements.txt
+
+      - name: Install and verify dependencies
+        run: |
+          REQ_FILE="Automation/SEER/scout_receiver/requirements.txt"
+          if [ -f "$REQ_FILE" ]; then
+            echo "::group::Installing dependencies from $REQ_FILE"
+            pip install -r "$REQ_FILE"
+            echo "::endgroup::"
+
+            echo "::group::Verifying imports"
+            python -c "
+          import aiohttp
+          import aiohttp_cors
+          import yaml
+          import jsonschema
+          print('All scout_receiver dependencies imported successfully.')
+          "
+            echo "::endgroup::"
+          else
+            echo "::notice::$REQ_FILE not found on this branch -- skipping dependency check."
+          fi

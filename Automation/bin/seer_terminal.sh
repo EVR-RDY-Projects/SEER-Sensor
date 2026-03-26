@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # seer_terminal.sh
 # Lightweight terminal wrapper to run the curses-based SEER console in a TTY.
