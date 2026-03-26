@@ -2,7 +2,8 @@
 """
 SEER Hot-Swap / Export Service
 Monitors for external drive presence and manages PCAP export flow:
-- When drive is present: drains backlog to drive, then mover writes directly to drive
+- When drive is present: drains backlog to drive,
+  then mover writes directly to drive
 - When drive is absent: mover writes to backlog, waiting for drive return
 - Generates integrity manifests (SHA256) and maintains transfer log
 """
@@ -26,7 +27,10 @@ os.makedirs("/var/log/seer", exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler("/var/log/seer/hotswap.log", mode="a")],
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("/var/log/seer/hotswap.log", mode="a"),
+    ],
 )
 log = logging.getLogger("seer-hotswap")
 
@@ -89,7 +93,9 @@ def detect_export_target(candidates, min_free_pct=2):
             stat = os.statvfs(candidate)
             free_bytes = stat.f_bavail * stat.f_frsize
             total_bytes = stat.f_blocks * stat.f_frsize
-            free_pct = (free_bytes / total_bytes * 100) if total_bytes > 0 else 0
+            free_pct = (
+                (free_bytes / total_bytes * 100) if total_bytes > 0 else 0
+            )
 
             if free_pct >= min_free_pct:
                 return (candidate, free_bytes)
@@ -143,7 +149,11 @@ def transfer_file(src, dst_dir, verify=True):
             dst_sha = compute_sha256(dst)
             if src_sha != dst_sha:
                 os.unlink(dst)
-                return (False, None, f"Checksum mismatch: {src_sha[:8]} != {dst_sha[:8]}")
+                return (
+                    False,
+                    None,
+                    f"Checksum mismatch: {src_sha[:8]} != {dst_sha[:8]}",
+                )
 
             # Verify success; safe to remove source
             os.unlink(src)
@@ -166,7 +176,9 @@ def write_manifest(directory, files_with_hashes):
             f.write("# Format: sha256  filename\n\n")
             for fname, sha in sorted(files_with_hashes):
                 f.write(f"{sha}  {fname}\n")
-        log.info(f"Wrote manifest: {manifest_path} ({len(files_with_hashes)} files)")
+        log.info(
+            f"Wrote manifest: {manifest_path} ({len(files_with_hashes)} files)"
+        )
     except Exception as e:
         log.error(f"Failed to write manifest {manifest_path}: {e}")
 
@@ -191,7 +203,9 @@ def export_batch(backlog_dir, drive_root, rotate_seconds):
     if not pcaps:
         return (0, 0)
 
-    log.info(f"Found {len(pcaps)} PCAPs in backlog; starting export to {drive_root}")
+    log.info(
+        f"Found {len(pcaps)} PCAPs in backlog; starting export to {drive_root}"
+    )
 
     # Organize by date
     date_today = datetime.now().strftime("%Y%m%d")
@@ -220,7 +234,11 @@ def export_batch(backlog_dir, drive_root, rotate_seconds):
             "dst": os.path.join(dest_dir, pcap.name),
             "size": pcap.stat().st_size if pcap.exists() else 0,
             "sha256": sha[:16] if sha else None,
-            "result": "OK" if success else "VERIFY_FAIL" if "mismatch" in (error or "") else "IO_ERROR",
+            "result": "OK"
+            if success
+            else "VERIFY_FAIL"
+            if "mismatch" in (error or "")
+            else "IO_ERROR",
         }
         transfer_log_entries.append(entry)
 
@@ -265,7 +283,8 @@ def main_loop():
     backlog_dir = cfg.get("backlog_dir", "/opt/seer/var/backlog")
     rotate_seconds = cfg.get("capture", {}).get("rotate_seconds", 20)
     mount_candidates = cfg.get("export", {}).get(
-        "mount_candidates", ["/mnt/seer_external", "/mnt/SEER_EXT", "/media/seer_external"]
+        "mount_candidates",
+        ["/mnt/seer_external", "/mnt/SEER_EXT", "/media/seer_external"],
     )
     min_free_pct = cfg.get("export", {}).get("min_free_pct", 2)
     poll_interval = cfg.get("export", {}).get("poll_interval", 2)
@@ -281,22 +300,36 @@ def main_loop():
     while True:
         try:
             # Detect external drive
-            drive_path, free_bytes = detect_export_target(mount_candidates, min_free_pct)
+            drive_path, free_bytes = detect_export_target(
+                mount_candidates, min_free_pct
+            )
             drive_present = drive_path is not None
 
             # Drive state transition: absent → present
             if drive_present and not last_drive_state:
-                log.info(f"Drive detected: {drive_path} (free: {free_bytes // (1024**2)} MB)")
+                log.info(
+                    f"Drive detected: {drive_path} "
+                    f"(free: {free_bytes // (1024**2)} MB)"
+                )
 
                 # Drain backlog to drive
-                success, fail = export_batch(backlog_dir, drive_path, rotate_seconds)
+                success, fail = export_batch(
+                    backlog_dir, drive_path, rotate_seconds
+                )
                 total_exported += success
 
                 if success > 0:
-                    log.info(f"Backlog drained: {success} PCAPs exported, {fail} failed")
+                    log.info(
+                        f"Backlog drained: {success} PCAPs "
+                        f"exported, {fail} failed"
+                    )
 
                 # Update state to show drive present
-                update_state(True, datetime.now().isoformat() if success > 0 else None, total_exported)
+                update_state(
+                    True,
+                    datetime.now().isoformat() if success > 0 else None,
+                    total_exported,
+                )
 
             # Drive state transition: present → absent
             elif not drive_present and last_drive_state:

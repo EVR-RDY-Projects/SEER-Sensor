@@ -144,7 +144,9 @@ class HeartbeatHandler:
 
         return self.current_scenario
 
-    async def simulate_scenario(self, scenario: str, duration_seconds: int = 60) -> Dict[str, Any]:
+    async def simulate_scenario(
+        self, scenario: str, duration_seconds: int = 60
+    ) -> Dict[str, Any]:
         """Activate a simulation scenario for testing.
 
         Args:
@@ -157,7 +159,10 @@ class HeartbeatHandler:
         valid_scenarios = ["normal", "degraded", "timeout", "error"]
 
         if scenario not in valid_scenarios:
-            return {"success": False, "error": f"Invalid scenario. Valid options: {valid_scenarios}"}
+            return {
+                "success": False,
+                "error": f"Invalid scenario. Valid options: {valid_scenarios}",
+            }
 
         self.current_scenario = scenario
         self.scenario_until = time.time() + duration_seconds
@@ -168,10 +173,14 @@ class HeartbeatHandler:
             "success": True,
             "scenario": scenario,
             "duration_seconds": duration_seconds,
-            "expires_at": datetime.fromtimestamp(self.scenario_until).isoformat(),
+            "expires_at": datetime.fromtimestamp(
+                self.scenario_until
+            ).isoformat(),
         }
 
-    async def update_configuration(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    async def update_configuration(
+        self, config: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Update heartbeat configuration at runtime.
 
         Args:
@@ -220,7 +229,9 @@ class HeartbeatHandler:
             "current_scenario": self.current_scenario,
             "heartbeat_count": self.heartbeat_count,
             "last_heartbeat": (
-                datetime.fromtimestamp(self.last_heartbeat_time).isoformat() if self.last_heartbeat_time else None
+                datetime.fromtimestamp(self.last_heartbeat_time).isoformat()
+                if self.last_heartbeat_time
+                else None
             ),
             "uptime_seconds": round(time.time() - self.start_time, 1),
         }

@@ -45,7 +45,9 @@ class PacketLogger:
     def __init__(self, logger: logging.Logger):
         self.logger = logger
 
-    def log_packet_received(self, source_ip: str, packet_size: int, protocol: str, timestamp: float) -> None:
+    def log_packet_received(
+        self, source_ip: str, packet_size: int, protocol: str, timestamp: float
+    ) -> None:
         """Log packet reception event."""
         self.logger.info(
             f"Packet received from {source_ip}",
@@ -60,7 +62,12 @@ class PacketLogger:
         )
 
     def log_data_extracted(
-        self, source_ip: str, data_size: int, data_type: str, checksum: str, processing_time: float
+        self,
+        source_ip: str,
+        data_size: int,
+        data_type: str,
+        checksum: str,
+        processing_time: float,
     ) -> None:
         """Log successful data extraction."""
         self.logger.info(
@@ -76,7 +83,13 @@ class PacketLogger:
             },
         )
 
-    def log_validation_error(self, source_ip: str, error_type: str, error_message: str, data_size: int) -> None:
+    def log_validation_error(
+        self,
+        source_ip: str,
+        error_type: str,
+        error_message: str,
+        data_size: int,
+    ) -> None:
         """Log validation error."""
         self.logger.warning(
             f"Validation error from {source_ip}: {error_type}",
@@ -136,7 +149,9 @@ def setup_logging(
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
             file_handler = logging.handlers.RotatingFileHandler(
-                log_file, maxBytes=max_size_mb * 1024 * 1024, backupCount=backup_count
+                log_file,
+                maxBytes=max_size_mb * 1024 * 1024,
+                backupCount=backup_count,
             )
             file_handler.setLevel(numeric_level)
             file_handler.setFormatter(formatter)
