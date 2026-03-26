@@ -6,12 +6,15 @@ Welcome to the SEER Sensor project. This guide covers everything you need to set
 
 Before contributing, review the EVR:RDY policies that govern this project:
 
-- **[Git Workflow Policy](https://github.com/EVR-RDY-Projects/evr-rdy-mcp/blob/main/policy/development/git-workflow-policy.md)** — Branching, commits, PRs
-- **[Code Review Standards](https://github.com/EVR-RDY-Projects/evr-rdy-mcp/blob/main/policy/development/code-review-standards.md)** — Review requirements
-- **[Python Coding Standards](https://github.com/EVR-RDY-Projects/evr-rdy-mcp/blob/main/policy/development/coding-standards/python-language/README.md)** — Google Python Style Guide (Ruff enforced)
-- **[Testing Standards](https://github.com/EVR-RDY-Projects/evr-rdy-mcp/blob/main/policy/development/testing-standards.md)** — 85% coverage requirement
-- **[Security Policy](https://github.com/EVR-RDY-Projects/evr-rdy-mcp/blob/main/policy/security/security-policy.md)** — Security requirements
-- **[Definition of Done](https://github.com/EVR-RDY-Projects/evr-rdy-mcp/blob/main/policy/development/definition-of-done.md)** — Completion criteria
+- **[Git Workflow Policy](https://github.com/EVR-RDY-Projects/evrrdy-mcp-internal/blob/main/policy/development/git-workflow-policy.md)** — Branching, commits, PRs
+- **[Code Review Standards](https://github.com/EVR-RDY-Projects/evrrdy-mcp-internal/blob/main/policy/development/code-review-standards.md)** — Review requirements
+- **[Python Coding Standards](https://github.com/EVR-RDY-Projects/evrrdy-mcp-internal/blob/main/policy/development/coding-standards/python-language/README.md)** — Google Python Style Guide (Ruff enforced)
+- **[Testing Standards](https://github.com/EVR-RDY-Projects/evrrdy-mcp-internal/blob/main/policy/development/testing-standards.md)** — 85% coverage requirement
+- **[Security Policy](https://github.com/EVR-RDY-Projects/evrrdy-mcp-internal/blob/main/policy/security/security-policy.md)** — Security requirements
+- **[Definition of Done](https://github.com/EVR-RDY-Projects/evrrdy-mcp-internal/blob/main/policy/development/definition-of-done.md)** — Completion criteria
+- **[AI/LLM Development Policy](https://github.com/EVR-RDY-Projects/evrrdy-mcp-internal/blob/main/policy/development/ai-llm-development-policy.md)** — AI usage requirements (MUST READ)
+
+> **Note**: The policy repo is private. You will be granted read access when onboarded as a contributor.
 
 ## Prerequisites
 
@@ -187,7 +190,7 @@ git push origin feat/your-username/description
    - **Compare:** `your-fork` → `feat/your-username/description`
    - Fill in the PR description with what you changed and why
 
-5. Wait for CI to pass (6 checks) and code review from a maintainer.
+5. Wait for CI to pass (7 checks) and code review from a maintainer.
 
 ### What Gets Checked
 
@@ -242,7 +245,7 @@ SEER-Sensor/
 ├── .github/
 │   ├── workflows/ci.yml      # CI pipeline
 │   └── CODEOWNERS            # Review requirements
-├── pyproject.toml             # Ruff config (Python 3.11, line-length 120)
+├── pyproject.toml             # Ruff config (Python 3.11, line-length 80)
 ├── .yamllint.yaml             # yamllint config
 └── ROADMAP.md                 # Project milestones
 ```
