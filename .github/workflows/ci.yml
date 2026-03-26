@@ -119,3 +119,42 @@ jobs:
           else
             echo "::notice::$REQ_FILE not found on this branch -- skipping dependency check."
           fi
+
+  file-check:
+    name: Blocked file extensions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for forbidden file extensions
+        run: |
+          BLOCKED="env pem key p12 pfx credentials secret exe dll so o pyc bin iso img jar war"
+          PATTERN=""
+          for ext in $BLOCKED; do
+            [ -n "$PATTERN" ] && PATTERN="$PATTERN|"
+            PATTERN="$PATTERN\\.${ext}$"
+          done
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(git diff --name-only --diff-filter=ACR \
+              origin/${{ github.base_ref }}...HEAD || true)
+          else
+            FILES=$(git diff --name-only --diff-filter=ACR HEAD~1 HEAD || true)
+          fi
+
+          if [ -z "$FILES" ]; then
+            echo "No new/changed files to check."
+            exit 0
+          fi
+
+          VIOLATIONS=$(echo "$FILES" | grep -iE "($PATTERN)" || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "::error::Forbidden file extensions detected:"
+            echo "$VIOLATIONS" | while read -r f; do
+              echo "::error file=$f::Blocked extension: $f"
+            done
+            exit 1
+          fi
+          echo "No forbidden file extensions found."
