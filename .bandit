@@ -1,0 +1,17 @@
+[bandit]
+# SEER Sensor - Bandit SAST Configuration
+#
+# Skips for patterns expected in a Linux system management / network sensor:
+# B104: hardcoded_bind_all_interfaces - intentional for network sensor
+# B108: hardcoded_tmp_directory - standard Linux temp paths
+# B110: try_except_pass - defensive patterns in system tools
+# B112: try_except_continue - defensive patterns in system tools
+# B310: urllib_urlopen - local-only API calls (localhost)
+# B324: hashlib - MD5/SHA1 used for integrity checks, not security
+# B404: import_subprocess - required for system management
+# B602: subprocess_popen_with_shell_equals_true - intentional shell commands
+# B603: subprocess_without_shell_equals_true - intentional subprocess use
+# B605: start_process_with_a_shell - intentional os.system calls for TUI
+# B607: start_process_with_partial_path - sudo/system commands
+# B609: linux_commands_wildcard_injection - controlled admin context
+skips = B104,B108,B110,B112,B310,B324,B404,B602,B603,B605,B607,B609

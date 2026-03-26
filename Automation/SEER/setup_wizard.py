@@ -35,7 +35,11 @@ DEFAULTS = {
         "disk_hard_pct": 90,
     },
     "export": {
-        "mount_candidates": ["/mnt/seer_external", "/mnt/SEER_EXT", "/media/seer_external"],
+        "mount_candidates": [
+            "/mnt/seer_external",
+            "/mnt/SEER_EXT",
+            "/media/seer_external",
+        ],
         "min_free_pct": 2,
         "poll_interval": 2,
     },
@@ -101,7 +105,9 @@ def prompt_str(label: str, default: str) -> str:
     return value or default
 
 
-def prompt_int(label: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
+def prompt_int(
+    label: str, default: int, lo: int | None = None, hi: int | None = None
+) -> int:
     while True:
         s = input(f"{label} [{default}]: ").strip() or str(default)
         try:
@@ -120,7 +126,9 @@ def prompt_int(label: str, default: int, lo: int | None = None, hi: int | None =
             print("  Enter an integer", " and ".join(rng))
 
 
-def prompt_float(label: str, default: float, lo: float | None = None, hi: float | None = None) -> float:
+def prompt_float(
+    label: str, default: float, lo: float | None = None, hi: float | None = None
+) -> float:
     while True:
         s = input(f"{label} [{default}]: ").strip() or str(default)
         try:
@@ -154,13 +162,19 @@ def iface_exists(name: str) -> bool:
 
 def ensure_seer_user() -> None:
     os.system("getent group seer >/dev/null 2>&1 || sudo groupadd -r seer")
-    os.system("id -u seer >/dev/null 2>&1 || sudo useradd -r -g seer -s /usr/sbin/nologin seer")
+    os.system(
+        "id -u seer >/dev/null 2>&1 || "
+        "sudo useradd -r -g seer -s /usr/sbin/nologin seer"
+    )
 
 
 def ensure_dirs() -> None:
     for d in REQUIRED_DIRS:
         Path(d).mkdir(parents=True, exist_ok=True)
-    os.system("sudo chown -R seer:seer /opt/seer /var/seer /var/log/seer >/dev/null 2>&1 || true")
+    os.system(
+        "sudo chown -R seer:seer /opt/seer /var/seer "
+        "/var/log/seer >/dev/null 2>&1 || true"
+    )
     os.system(
         "sudo chmod 0755 /opt/seer /opt/seer/bin /opt/seer/etc /opt/seer/var "
         "/var/seer /var/seer/* /var/log/seer >/dev/null 2>&1 || true"
@@ -185,7 +199,8 @@ def write_yaml(cfg: dict) -> None:
 
 
 def install_wait_helper(iface: str) -> None:
-    """Install the wait-for-link helper script and a systemd drop-in so capture waits for link at boot.
+    """Install the wait-for-link helper script and a
+    systemd drop-in so capture waits for link at boot.
     This is best-effort and may require sudo.
     """
     # default timeout (seconds)
@@ -199,10 +214,18 @@ def install_wait_helper(iface: str) -> None:
         if src.exists():
             print(f"Installing wait helper to {dst}")
             # copy with sudo
-            os.system(f"sudo install -m 0755 {shlex.quote(str(src))} {shlex.quote(str(dst))} || true")
+            os.system(
+                f"sudo install -m 0755 "
+                f"{shlex.quote(str(src))} "
+                f"{shlex.quote(str(dst))} || true"
+            )
             os.system(f"sudo chown root:root {shlex.quote(str(dst))} || true")
         else:
-            print("Warning: wait helper source not found; skipping installation of helper script.")
+            print(
+                "Warning: wait helper source not "
+                "found; skipping installation of "
+                "helper script."
+            )
 
         # If YAML exists, try to read configured timeout
         try:
@@ -220,13 +243,19 @@ def install_wait_helper(iface: str) -> None:
         )
         # Ensure drop-in directory exists and write the drop-in via sudo
         os.system(f"sudo mkdir -p {shlex.quote(drop_dir)} || true")
-        cmd = f"echo {shlex.quote(content)} | sudo tee {shlex.quote(drop_file)} >/dev/null"
+        cmd = (
+            f"echo {shlex.quote(content)} "
+            f"| sudo tee {shlex.quote(drop_file)} "
+            f">/dev/null"
+        )
         os.system(cmd)
 
         # reload systemd so the drop-in is recognized
         os.system("sudo systemctl daemon-reload || true")
         # enable and restart the capture service for this iface
-        os.system(f"sudo systemctl enable --now seer-capture@{iface}.service || true")
+        os.system(
+            f"sudo systemctl enable --now seer-capture@{iface}.service || true"
+        )
     except Exception as e:
         print(f"Failed to install wait helper: {e}")
 
@@ -243,7 +272,11 @@ def configure_monitor_iface(iface: str) -> None:
     os.system(f"sudo ip link set dev {iface} promisc on >/dev/null 2>&1")
     # ethtool may not exist; that's fine
     if shutil.which("ethtool"):
-        os.system(f"sudo ethtool -K {iface} gro off lro off tso off gso off >/dev/null 2>&1 || true")
+        os.system(
+            f"sudo ethtool -K {iface} "
+            f"gro off lro off tso off gso off "
+            f">/dev/null 2>&1 || true"
+        )
     # Show a brief confirmation line
     os.system(f"ip -d link show {iface} | sed -n '1p' || true")
 
@@ -253,7 +286,8 @@ def main(non_interactive: bool = False) -> None:
     cfg = DEFAULTS.copy()
 
     if non_interactive:
-        # Use defaults but validate interface exists; fallback to first non-loopback
+        # Use defaults but validate interface exists;
+        # fallback to first non-loopback
         default_iface = cfg["interface"]
         if iface_exists(default_iface):
             cfg["interface"] = default_iface
@@ -273,9 +307,12 @@ def main(non_interactive: bool = False) -> None:
             configure_monitor_iface(cfg["interface"])
         except Exception:
             print(
-                "Warning: NIC monitor configuration step failed (non-fatal). You can configure later with ip/ethtool."
+                "Warning: NIC monitor configuration "
+                "step failed (non-fatal). You can "
+                "configure later with ip/ethtool."
             )
-        # Install wait-for-link helper and drop-in so capture waits for link at boot
+        # Install wait-for-link helper and drop-in so
+        # capture waits for link at boot
         try:
             install_wait_helper(cfg["interface"])
         except Exception:
@@ -312,7 +349,9 @@ def main(non_interactive: bool = False) -> None:
         1,
         os.cpu_count() or 1,
     )
-    cfg["fanout_id"] = prompt_int("AF_PACKET fanout ID", cfg["fanout_id"], 1, 65535)
+    cfg["fanout_id"] = prompt_int(
+        "AF_PACKET fanout ID", cfg["fanout_id"], 1, 65535
+    )
 
     # UI/mover
     cfg["refresh_interval"] = prompt_float(
@@ -333,8 +372,12 @@ def main(non_interactive: bool = False) -> None:
         cfg[k] = prompt_str(f"{k} path", cfg[k])
 
     # Disk guardrails
-    soft = prompt_int("Disk soft limit %", cfg["capture"]["disk_soft_pct"], 1, 99)
-    hard = prompt_int("Disk hard limit %", cfg["capture"]["disk_hard_pct"], 1, 99)
+    soft = prompt_int(
+        "Disk soft limit %", cfg["capture"]["disk_soft_pct"], 1, 99
+    )
+    hard = prompt_int(
+        "Disk hard limit %", cfg["capture"]["disk_hard_pct"], 1, 99
+    )
     if soft >= hard:
         print("  soft% must be < hard%; adjusting soft = hard-1.")
         soft = hard - 1
@@ -343,28 +386,43 @@ def main(non_interactive: bool = False) -> None:
 
     # Scout Receiver configuration (HTTP server for SCOUT Agent data)
     print("\n== Scout Receiver Configuration ==")
-    print("The Scout Receiver accepts data from SCOUT Agents running on Windows endpoints.")
+    print(
+        "The Scout Receiver accepts data from "
+        "SCOUT Agents running on Windows endpoints."
+    )
 
-    cfg["scout_receiver"]["enabled"] = prompt_bool("Enable Scout Receiver", cfg["scout_receiver"]["enabled"])
+    cfg["scout_receiver"]["enabled"] = prompt_bool(
+        "Enable Scout Receiver", cfg["scout_receiver"]["enabled"]
+    )
 
     if cfg["scout_receiver"]["enabled"]:
         cfg["scout_receiver"]["server"]["host"] = prompt_str(
-            "Scout Receiver listen address (0.0.0.0 for all interfaces)", cfg["scout_receiver"]["server"]["host"]
+            "Scout Receiver listen address (0.0.0.0 for all interfaces)",
+            cfg["scout_receiver"]["server"]["host"],
         )
         cfg["scout_receiver"]["server"]["port"] = prompt_int(
-            "Scout Receiver HTTP port", cfg["scout_receiver"]["server"]["port"], 1024, 65535
+            "Scout Receiver HTTP port",
+            cfg["scout_receiver"]["server"]["port"],
+            1024,
+            65535,
         )
         cfg["scout_receiver"]["storage"]["data_dir"] = prompt_str(
-            "Scout data storage directory", cfg["scout_receiver"]["storage"]["data_dir"]
+            "Scout data storage directory",
+            cfg["scout_receiver"]["storage"]["data_dir"],
         )
         cfg["scout_receiver"]["storage"]["retention_days"] = prompt_int(
-            "Data retention (days)", cfg["scout_receiver"]["storage"]["retention_days"], 1, 365
+            "Data retention (days)",
+            cfg["scout_receiver"]["storage"]["retention_days"],
+            1,
+            365,
         )
         cfg["scout_receiver"]["validation"]["verify_checksums"] = prompt_bool(
-            "Verify data checksums", cfg["scout_receiver"]["validation"]["verify_checksums"]
+            "Verify data checksums",
+            cfg["scout_receiver"]["validation"]["verify_checksums"],
         )
         cfg["scout_receiver"]["logging"]["level"] = prompt_str(
-            "Log level (DEBUG/INFO/WARNING/ERROR)", cfg["scout_receiver"]["logging"]["level"]
+            "Log level (DEBUG/INFO/WARNING/ERROR)",
+            cfg["scout_receiver"]["logging"]["level"],
         ).upper()
 
     # Do work
@@ -376,8 +434,13 @@ def main(non_interactive: bool = False) -> None:
     try:
         configure_monitor_iface(cfg["interface"])
     except Exception:
-        print("Warning: NIC monitor configuration step failed (non-fatal). You can configure later with ip/ethtool.")
-    # Install wait-for-link helper and drop-in so capture waits for link at boot
+        print(
+            "Warning: NIC monitor configuration "
+            "step failed (non-fatal). You can "
+            "configure later with ip/ethtool."
+        )
+    # Install wait-for-link helper and drop-in so
+    # capture waits for link at boot
     try:
         install_wait_helper(cfg["interface"])
     except Exception:
@@ -387,7 +450,12 @@ def main(non_interactive: bool = False) -> None:
 
 def cli_main():
     p = argparse.ArgumentParser(description="SEER setup wizard (interactive)")
-    p.add_argument("--yes", "-y", action="store_true", help="Use defaults and be non-interactive")
+    p.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Use defaults and be non-interactive",
+    )
     args = p.parse_args()
     try:
         main(non_interactive=args.yes)

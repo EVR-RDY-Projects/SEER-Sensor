@@ -71,7 +71,8 @@ class StatisticsCollector:
             }
         )
 
-        # Event schema tracking - from EventSchema field in data (ProcessEvent, etc.)
+        # Event schema tracking - from EventSchema field
+        # in data (ProcessEvent, etc.)
         self.event_schema_stats: Dict[str, Dict[str, Any]] = defaultdict(
             lambda: {
                 "count": 0,
@@ -80,7 +81,8 @@ class StatisticsCollector:
             }
         )
 
-        # Granular event type tracking - from EventType field (ProcessCreated, etc.)
+        # Granular event type tracking - from EventType
+        # field (ProcessCreated, etc.)
         self.event_type_stats: Dict[str, Dict[str, Any]] = defaultdict(
             lambda: {
                 "count": 0,
@@ -168,7 +170,9 @@ class StatisticsCollector:
 
             # Trim recent requests list
             if len(self.recent_requests) > self.max_recent_requests:
-                self.recent_requests = self.recent_requests[-self.max_recent_requests :]
+                self.recent_requests = self.recent_requests[
+                    -self.max_recent_requests :
+                ]
 
     def _parse_event_types(self, data: Any, timestamp: str) -> None:
         """Parse event types from received data.
@@ -244,7 +248,9 @@ class StatisticsCollector:
 
             avg_processing_time = 0.0
             if self.successful_requests > 0:
-                avg_processing_time = self.total_processing_time / self.successful_requests
+                avg_processing_time = (
+                    self.total_processing_time / self.successful_requests
+                )
 
             success_rate = 0.0
             if self.total_requests > 0:
@@ -257,11 +263,15 @@ class StatisticsCollector:
                 "failed_requests": self.failed_requests,
                 "success_rate": round(success_rate * 100, 2),
                 "total_data_received": self.total_data_received,
-                "total_data_received_mb": round(self.total_data_received / (1024 * 1024), 2),
+                "total_data_received_mb": round(
+                    self.total_data_received / (1024 * 1024), 2
+                ),
                 "total_records_received": self.total_records_received,
                 "average_processing_time": round(avg_processing_time, 4),
                 "min_processing_time": (
-                    round(self.min_processing_time, 4) if self.min_processing_time != float("inf") else 0
+                    round(self.min_processing_time, 4)
+                    if self.min_processing_time != float("inf")
+                    else 0
                 ),
                 "max_processing_time": round(self.max_processing_time, 4),
                 "unique_sources": len(self.source_stats),
@@ -279,7 +289,11 @@ class StatisticsCollector:
 
             # Add per-source breakdown
             source_breakdown = []
-            for ip, stats in sorted(self.source_stats.items(), key=lambda x: x[1]["requests"], reverse=True):
+            for ip, stats in sorted(
+                self.source_stats.items(),
+                key=lambda x: x[1]["requests"],
+                reverse=True,
+            ):
                 source_breakdown.append({"source_ip": ip, **stats})
 
             # Add error breakdown
@@ -338,17 +352,29 @@ class StatisticsCollector:
         with self._lock:
             # Build data type breakdown
             data_types = []
-            for dtype, stats in sorted(self.data_type_stats.items(), key=lambda x: x[1]["count"], reverse=True):
+            for dtype, stats in sorted(
+                self.data_type_stats.items(),
+                key=lambda x: x[1]["count"],
+                reverse=True,
+            ):
                 data_types.append({"type": dtype, **stats})
 
             # Build event schema breakdown
             event_schemas = []
-            for schema, stats in sorted(self.event_schema_stats.items(), key=lambda x: x[1]["count"], reverse=True):
+            for schema, stats in sorted(
+                self.event_schema_stats.items(),
+                key=lambda x: x[1]["count"],
+                reverse=True,
+            ):
                 event_schemas.append({"schema": schema, **stats})
 
             # Build granular event type breakdown
             event_types = []
-            for etype, stats in sorted(self.event_type_stats.items(), key=lambda x: x[1]["count"], reverse=True):
+            for etype, stats in sorted(
+                self.event_type_stats.items(),
+                key=lambda x: x[1]["count"],
+                reverse=True,
+            ):
                 event_types.append({"event_type": etype, **stats})
 
             return {
@@ -410,5 +436,9 @@ class StatisticsCollector:
             "total_requests": stats["total_requests"],
             "success_rate": stats["success_rate"],
             "unique_sources": stats["unique_sources"],
-            "last_activity": (self.recent_requests[-1]["timestamp"] if self.recent_requests else None),
+            "last_activity": (
+                self.recent_requests[-1]["timestamp"]
+                if self.recent_requests
+                else None
+            ),
         }

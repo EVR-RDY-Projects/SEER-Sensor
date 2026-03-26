@@ -23,7 +23,8 @@ QUIET_SECS = 3  # consider file closed if not touched for >= 3s
 
 # Export drive candidates (in priority order)
 MOUNT_CANDIDATES = CFG.get("export", {}).get(
-    "mount_candidates", ["/mnt/seer_external", "/mnt/SEER_EXT", "/media/seer_external"]
+    "mount_candidates",
+    ["/mnt/seer_external", "/mnt/SEER_EXT", "/media/seer_external"],
 )
 MIN_FREE_PCT = CFG.get("export", {}).get("min_free_pct", 2)
 
@@ -50,7 +51,9 @@ def detect_export_drive():
             stat = os.statvfs(candidate)
             free_bytes = stat.f_bavail * stat.f_frsize
             total_bytes = stat.f_blocks * stat.f_frsize
-            free_pct = (free_bytes / total_bytes * 100) if total_bytes > 0 else 0
+            free_pct = (
+                (free_bytes / total_bytes * 100) if total_bytes > 0 else 0
+            )
 
             if free_pct >= MIN_FREE_PCT:
                 # Use dated subdirectory on drive
